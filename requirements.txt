@@ -4,13 +4,14 @@ aiofiles
 anitopy
 apscheduler
 dnspython
-motor==3.3.2
+lxml_html_clean
+motor
 feedparser
 psutil
 pycountry
-pyrofork==2.3.45
+pyrofork
 python-dotenv
 tgcrypto
-torrentp==0.1.7
+torrentp
 git+https://github.com/kaif-00z/html-telegraph-poster
 uvloop
