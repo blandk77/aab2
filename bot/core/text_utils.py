@@ -11,15 +11,15 @@ from .func_utils import handle_logs
 from .reporter import rep
 
 CAPTION_FORMAT = """
-<b>㊂ <i>{title}</i></b>
-<b>╭┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅</b>
-<b>⊙</b> <i>Genres:</i> <i>{genres}</i>
-<b>⊙</b> <i>Status:</i> <i>RELEASING</i> 
-<b>⊙</b> <i>Source:</i> <i>Subsplease</i>
-<b>⊙</b> <i>Episode:</i> <i>{ep_no}</i>
-<b>⊙</b> <i>Audio: Japanese</i>
-<b>⊙</b> <i>Subtitle: English</i>
-<b>╰┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅</b>
+ <code>{title}</code>
+<b>◇──◇──◇──◇──◇──◇──◇──◇</b>
+<b>✦</b> <i>Genres:</i> <code>{genres}</code>
+<b>✦</b> <i>Status:</i> <code>RELEASING</code> 
+<b>✦</b> <i>Source:</i> <code>Subsplease</code>
+<b>✦</b> <i>Episode:</i> <code>{ep_no}</code>
+<b>✦</b> <i>Audio:</i> <code>Japanese</code>
+<b>✦</b> <i>Subtitle:</i> <code>English</code>
+<b>◇──◇──◇──◇──◇──◇──◇──◇</b>
 ╭┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅
 ⌬  <b><i>Powered By</i></b> ~ </i></b><b><i>{cred}</i></b>
 ╰┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅┅
@@ -192,7 +192,7 @@ class TextEditor:
     async def get_poster(self):
         if anime_id := await self.get_id():
             return f"https://img.anili.st/media/{anime_id}"
-        return "https://telegra.ph/file/112ec08e59e73b6189a20.jpg"
+        return ""
         
     @handle_logs
     async def get_upname(self, qual=""):
