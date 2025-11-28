@@ -1,4 +1,5 @@
 from asyncio import sleep as asleep, gather
+from datetime import datetime
 from pyrogram.filters import command, private, user
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from pyrogram.errors import FloodWait, MessageNotModified
@@ -6,8 +7,9 @@ from pyrogram.errors import FloodWait, MessageNotModified
 from bot import bot, bot_loop, Var, ani_cache
 from bot.core.database import db
 from bot.core.func_utils import decode, is_fsubbed, get_fsubs, editMessage, sendMessage, new_task, convertTime, getfeed
-from bot.core.auto_animes import get_animes
+from bot.core.auto_animes import process_scheduled_anime
 from bot.core.reporter import rep
+from bot.core.text_utils import AniLister
 
 @bot.on_message(command('start') & private)
 @new_task
@@ -74,14 +76,15 @@ async def start_msg(client, message):
             await editMessage(temp, "<b>File Not Found !</b>")
     else:
         await editMessage(temp, "<b>Input Link is Invalid for Usage !</b>")
-    
+
+
 @bot.on_message(command('pause') & private & user(Var.ADMINS))
 async def pause_fetch(client, message):
     ani_cache['fetch_animes'] = False
     await sendMessage(message, "`Successfully Paused Fetching Animes...`")
 
 @bot.on_message(command('resume') & private & user(Var.ADMINS))
-async def pause_fetch(client, message):
+async def resume_fetch(client, message):
     ani_cache['fetch_animes'] = True
     await sendMessage(message, "`Successfully Resumed Fetching Animes...`")
 
@@ -90,24 +93,97 @@ async def pause_fetch(client, message):
 async def _log(client, message):
     await message.reply_document("log.txt", quote=True)
 
-@bot.on_message(command('addlink') & private & user(Var.ADMINS))
-@new_task
-async def add_task(client, message):
-    if len(args := message.text.split()) <= 1:
-        return await sendMessage(message, "<b>No Link Found to Add</b>")
-    
-    Var.RSS_ITEMS.append(args[0])
-    req_msg = await sendMessage(message, f"`Global Link Added Successfully!`\n\n    • **All Link(s) :** {', '.join(Var.RSS_ITEMS)[:-2]}")
+# ============ NEW SCHEDULE COMMANDS ============
 
-@bot.on_message(command('addtask') & private & user(Var.ADMINS))
+@bot.on_message(command('addschedule') & private & user(Var.ADMINS))
 @new_task
-async def add_task(client, message):
-    if len(args := message.text.split()) <= 1:
-        return await sendMessage(message, "<b>No Task Found to Add</b>")
-    
-    index = int(args[2]) if len(args) > 2 and args[2].isdigit() else 0
-    if not (taskInfo := await getfeed(args[1], index)):
-        return await sendMessage(message, "<b>No Task Found to Add for the Provided Link</b>")
-    
-    ani_task = bot_loop.create_task(get_animes(taskInfo.title, taskInfo.link, True))
-    await sendMessage(message, f"<i><b>Task Added Successfully!</b></i>\n\n    • <b>Task Name :</b> {taskInfo.title}\n    • <b>Task Link :</b> {args[1]}")
+async def add_schedule(client, message):
+    if len(args := message.text.split(maxsplit=1)) <= 1:
+        return await sendMessage(message, "<b>Usage: /addschedule rss_link1,rss_link2|platform|audio|title\nUse 'None' for optional fields</b>")
+
+    parts = args[1].split('|', 3)
+    rss_raw = parts[0].strip()
+    platform = parts[1].strip() if len(parts) > 1 and parts[1].strip().lower() != 'none' else None
+    audio_pref = parts[2].strip() if len(parts) > 2 and parts[2].strip().lower() != 'none' else None
+    custom_title = parts[3].strip() if len(parts) > 3 and parts[3].strip().lower() != 'none' else None
+
+    rss_links = [link.strip() for link in rss_raw.split(',') if link.strip()]
+
+    if not rss_links:
+        return await sendMessage(message, "<b>No valid RSS links!</b>")
+
+    # Get anime name from first RSS
+    feed = await getfeed(rss_links[0])
+    if not feed:
+        return await sendMessage(message, "<b>First RSS invalid!</b>")
+    ani_name = feed.title.split(' - ')[0].replace('[Toonshub]', '').replace('[VARYG]', '').strip()
+
+    # Get next airing from AniList
+    anilister = AniLister(ani_name, datetime.now().year)
+    ani_data = await anilister.get_anidata()
+    next_air = ani_data.get('nextAiringEpisode')
+    if not next_air:
+        return await sendMessage(message, "<b>No upcoming episode found on AniList!</b>")
+
+    airing_time = datetime.fromtimestamp(next_air['airingAt'] + 300)  # +5min buffer
+
+    sch_id = await db.saveSchedule(
+        name=ani_name,
+        rss_links=rss_links,
+        platform=platform,
+        audio_pref=audio_pref,
+        custom_title=custom_title,
+        timestamp=airing_time.timestamp()
+    )
+
+    sch.add_job(process_scheduled_anime, 'date', run_date=airing_time, args=(sch_id,))
+
+    await sendMessage(message,
+        f"<b>Scheduled Successfully!</b>\n"
+        f"<b>Anime:</b> {ani_name}\n"
+        f"<b>Time:</b> {airing_time.strftime('%Y-%m-%d %I:%M %p')} IST\n"
+        f"<b>RSS:</b> {len(rss_links)} link(s)\n"
+        f"<b>Platform:</b> {platform or 'Any'}\n"
+        f"<b>Audio Pref:</b> {audio_pref or 'Any'}\n"
+        f"<b>Title:</b> {custom_title or 'Auto'}"
+    )
+
+@bot.on_message(command('listschedule') & private & user(Var.ADMINS))
+@new_task
+async def list_schedules(client, message):
+    schedules = await db.listSchedules()
+    if not schedules:
+        return await sendMessage(message, "<b>No active schedules!</b>")
+    txt = "<b>Active Schedules:</b>\n\n"
+    for s in schedules:
+        dt = datetime.fromtimestamp(s['timestamp'])
+        txt += f"<b>ID:</b> <code>{s['_id']}</code>\n"
+        txt += f"<b>Name:</b> {s['name']}\n"
+        txt += f"<b>Time:</b> {dt.strftime('%Y-%m-%d %I:%M %p')} IST\n"
+        txt += f"<b>Audio:</b> {s.get('audio_pref') or 'Any'}\n"
+        txt += "────────────\n"
+    await sendMessage(message, txt)
+
+@bot.on_message(command('delschedule') & private & user(Var.ADMINS))
+@new_task
+async def del_schedule(client, message):
+    if len(args := message.text.split()) < 2:
+        return await sendMessage(message, "<b>Usage: /delschedule &lt;id&gt;</b>")
+    if await db.delSchedule(args[1]):
+        await sendMessage(message, "<b>Schedule deleted!</b>")
+    else:
+        await sendMessage(message, "<b>ID not found!</b>")
+
+@bot.on_message(command('editschedule') & private & user(Var.ADMINS))
+@new_task
+async def edit_schedule(client, message):
+    if len(args := message.text.split()) < 3:
+        return await sendMessage(message, "<b>Usage: /editschedule &lt;id&gt; &lt;Sub/Dual/None&gt;</b>")
+    sch_id, pref = args[1], args[2]
+    if pref not in ['Sub', 'Dual', 'None']:
+        return await sendMessage(message, "<b>Invalid preference!</b>")
+    new_pref = None if pref == 'None' else pref
+    if await db.editScheduleAudio(sch_id, new_pref):
+        await sendMessage(message, f"<b>Updated {sch_id} → {pref}</b>")
+    else:
+        await sendMessage(message, "<b>ID not found!</b>")
