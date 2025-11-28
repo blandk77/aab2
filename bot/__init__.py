@@ -39,16 +39,16 @@ class Var:
         LOGS.critical('Important Variables Missing. Fill Up and Retry..!! Exiting Now...')
         exit(1)
 
-    RSS_ITEMS = getenv("RSS_ITEMS", "https://subsplease.org/rss/?r=1080").split()
-    FSUB_CHATS = list(map(int, getenv('FSUB_CHATS').split()))
+    # REMOVED: RSS_ITEMS completely — now fully schedule-based
+    FSUB_CHATS = list(map(int, getenv('FSUB_CHATS', '').split())) if getenv('FSUB_CHATS') else []
     BACKUP_CHANNEL = getenv("BACKUP_CHANNEL") or ""
     MAIN_CHANNEL = int(getenv("MAIN_CHANNEL"))
-    LOG_CHANNEL = int(getenv("LOG_CHANNEL") or 0)
+    LOG_CHANNEL = int(getenv("LOG_CHANNEL", "0"))
     FILE_STORE = int(getenv("FILE_STORE"))
     ADMINS = list(map(int, getenv("ADMINS", "1242011540").split()))
     
     SEND_SCHEDULE = getenv("SEND_SCHEDULE", "False").lower() == "true"
-    BRAND_UNAME = getenv("BRAND_UNAME", "@username")
+    BRAND_UNAME = getenv("BRAND_UNAME", "@Animes_Guy")
     FFCODE_1080 = getenv("FFCODE_1080") or """ffmpeg -i '{}' -progress '{}' -preset veryfast -c:v libx264 -s 1920x1080 -pix_fmt yuv420p -crf 30 -c:a libopus -b:a 32k -c:s copy -map 0 -ac 2 -ab 32k -vbr 2 -level 3.1 '{}' -y"""
     FFCODE_720 = getenv("FFCODE_720") or """ffmpeg -i '{}' -progress '{}' -preset superfast -c:v libx264 -s 1280x720 -pix_fmt yuv420p -crf 30 -c:a libopus -b:a 32k -c:s copy -map 0 -ac 2 -ab 32k -vbr 2 -level 3.1 '{}' -y"""
     FFCODE_480 = getenv("FFCODE_480") or """ffmpeg -i '{}' -progress '{}' -preset superfast -c:v libx264 -s 854x480 -pix_fmt yuv420p -crf 30 -c:a libopus -b:a 32k -c:s copy -map 0 -ac 2 -ab 32k -vbr 2 -level 3.1 '{}' -y"""
