@@ -15,3 +15,5 @@ tgcrypto
 torrentp
 git+https://github.com/kaif-00z/html-telegraph-poster
 uvloop
+Flask
+gunicorn
