@@ -69,6 +69,7 @@ async def main():
     # START SCHEDULER NOW — loop is fully running
     sch.start()
     LOGS.info("Scheduler started successfully!")
+    bot_loop = bot.loop
     
     LOGS.info('Auto Anime Bot Started! Running in SCHEDULE mode.')
     bot_loop.create_task(queue_loop())
