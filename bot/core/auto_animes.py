@@ -1,39 +1,140 @@
 from asyncio import gather, create_task, sleep as asleep, Event
-from asyncio.subprocess import PIPE
-from os import path as ospath, system
-from aiofiles import open as aiopen
+from os import path as ospath, remove as osremove
 from aiofiles.os import remove as aioremove
-from traceback import format_exc
-from base64 import urlsafe_b64encode
 from time import time
+from datetime import datetime
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from pyrogram.errors import MessageNotFound
 
-from bot import bot, bot_loop, Var, ani_cache, ffQueue, ffLock, ff_queued
+from bot import bot, Var, ani_cache, ffQueue, ffLock, ff_queued, sch
 from .tordownload import TorDownloader
 from .database import db
-from .func_utils import getfeed, encode, editMessage, sendMessage, convertBytes
+from .func_utils import getfeed, mediainfo, editMessage, sendMessage, convertBytes
 from .text_utils import TextEditor
 from .ffencoder import FFEncoder
 from .tguploader import TgUploader
 from .reporter import rep
 
-btn_formatter = {
-    '1080':'𝟭𝟬𝟴𝟬𝗽', 
-    '720':'𝟳𝟮𝟬𝗽',
-    '480':'𝟰𝟴𝟬𝗽',
-    '360':'𝟯𝟲𝟬𝗽'
-}
+btn_formatter = {'1080':'1080p', '720':'720p', '480':'480p', '360':'360p'}
 
-async def fetch_animes():
-    await rep.report("Fetch Animes Started !!", "info")
-    while True:
-        await asleep(60)
-        if ani_cache['fetch_animes']:
-            for link in Var.RSS_ITEMS:
-                if (info := await getfeed(link, 0)):
-                    bot_loop.create_task(get_animes(info.title, info.link))
+async def process_scheduled_anime(sch_id):
+    sch_data = await db.getSchedule(sch_id)
+    if not sch_data:
+        return
 
-async def get_animes(name, torrent, force=False):
+    start_time = time()
+    max_duration = 6 * 3600  # 6 hours max
+    retry_interval = 120     # 2 min base
+
+    while time() - start_time < max_duration:
+        found_valid = False
+        for rss_link in sch_data['rss_links']:
+            info = await getfeed(rss_link, 0)
+            if not info:
+                continue
+
+            title = info.title
+            torrent = info.link
+
+            # Skip Batch/Movie
+            if "[Batch]" in title or "Movie" in title or not TextEditor(title).pdata.get("episode_number"):
+                await rep.report(f"Skipped Batch/Movie: {title}", "warning")
+                await db.delSchedule(sch_id)
+                return
+
+            # Platform filter (optional)
+            if sch_data['platform'] and sch_data['platform'] not in title:
+                continue
+
+            # Channel duplicate check
+            ep_no = TextEditor(title).pdata.get("episode_number")
+            search_name = sch_data['custom_title'] or sch_data['name']
+            search_query = f'"{search_name}" "Episode: {ep_no}"'
+            try:
+                msgs = await bot.search_messages(Var.MAIN_CHANNEL, query=search_query, limit=1)
+                if msgs:
+                    await rep.report(f"Already uploaded: {title}", "info")
+                    await db.delSchedule(sch_id)
+                    return
+            except:
+                pass
+
+            # Download
+            dl_path = await TorDownloader("./downloads").download(torrent, title)
+            if not dl_path or not ospath.exists(dl_path):
+                continue
+
+            # Mediainfo check
+            try:
+                minfo_json = (await mediainfo(dl_path, get_json=True))
+                tracks = minfo_json['media']['track']
+            except:
+                await aioremove(dl_path)
+                continue
+
+            video_tracks = [t for t in tracks if t['@type'] == 'Video']
+            audio_tracks = [t for t in tracks if t['@type'] == 'Audio']
+            text_tracks = [t for t in tracks if t['@type'] == 'Text']
+
+            # HEVC skip
+            if any('HEVC' in t.get('Format', '') or 'x265' in t.get('CodecID', '') for t in video_tracks):
+                await rep.report(f"Skipped HEVC: {title}", "warning")
+                await aioremove(dl_path)
+                continue
+
+            # English subs REQUIRED
+            has_eng_sub = any('eng' in t.get('Language', '').lower() for t in text_tracks)
+            if not has_eng_sub:
+                await rep.report(f"No English subs: {title} – retrying...", "warning")
+                await aioremove(dl_path)
+                await asleep(retry_interval + 10)
+                continue
+
+            sub_type = "Multi-Sub" if len(text_tracks) > 1 else "English"
+
+            # Audio check
+            langs = [t.get('Language', '').lower() for t in audio_tracks]
+            original = any(l in ['jpn', 'chi', 'kor'] for l in langs)
+            has_eng_audio = 'eng' in langs
+            is_sub = len(audio_tracks) == 1 and original
+            is_dual = len(audio_tracks) == 2 and original and has_eng_audio
+
+            if len(audio_tracks) > 2 or not (is_sub or is_dual):
+                await rep.report(f"Invalid audio tracks: {title}", "warning")
+                await aioremove(dl_path)
+                continue
+
+            audio_type = "Dual" if is_dual else "Sub"
+            audio_lang = next((l.upper() for l in langs if l in ['jpn', 'chi', 'kor']), "Japanese")
+            if is_dual:
+                audio_lang += " + English"
+
+            # Audio preference logic
+            if sch_data['audio_pref'] == 'Dual' and not is_dual:
+                await rep.report(f"Dual not found: {title} – waiting...", "info")
+                await aioremove(dl_path)
+                await asleep(retry_interval + 10)
+                continue
+            if sch_data['audio_pref'] == 'Sub' and is_dual:
+                # Prefer Sub if explicitly asked
+                await rep.report(f"Dual found but Sub preferred – skipping", "info")
+                await aioremove(dl_path)
+                continue
+
+            # VALID RELEASE FOUND
+            found_valid = True
+            await get_animes(title, torrent, force=True, sch_data=sch_data,
+                           dl_path=dl_path, audio_lang=audio_lang, sub_type=sub_type, audio_type=audio_type)
+            await db.delSchedule(sch_id)
+            return
+
+        if not found_valid:
+            await asleep(retry_interval + 10)  # rate limit
+
+    await rep.report(f"TIMEOUT after 6h: {sch_data['name']} – No valid release", "error")
+    await db.delSchedule(sch_id)
+
+async def get_animes(name, torrent, force=False, sch_data=None, dl_path=None, audio_lang="Japanese", sub_type="English", audio_type="Sub"):
     try:
         aniInfo = TextEditor(name)
         await aniInfo.load_anilist()
