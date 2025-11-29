@@ -108,24 +108,21 @@ async def add_schedule(client, message):
     custom_title = parts[3].strip() if len(parts) > 3 and parts[3].strip().lower() != 'none' else None
 
     rss_links = [link.strip() for link in rss_raw.split(',') if link.strip()]
-
     if not rss_links:
         return await sendMessage(message, "<b>No valid RSS links!</b>")
 
-    # Get anime name from first RSS
     feed = await getfeed(rss_links[0])
     if not feed:
         return await sendMessage(message, "<b>First RSS invalid!</b>")
-    ani_name = feed.title.split(' - ')[0].replace('[Toonshub]', '').replace('[VARYG]', '').strip()
+    ani_name = feed.title.split(' - ')[0].replace('[Toonshub]', '').replace('[VARYG]', '').replace('[Erai-raws]', '').strip()
 
-    # Get next airing from AniList
     anilister = AniLister(ani_name, datetime.now().year)
     ani_data = await anilister.get_anidata()
     next_air = ani_data.get('nextAiringEpisode')
     if not next_air:
-        return await sendMessage(message, "<b>No upcoming episode found on AniList!</b>")
+        return await sendMessage(message, "<b>No upcoming episode on AniList!</b>")
 
-    airing_time = datetime.fromtimestamp(next_air['airingAt'] + 300)  # +5min buffer
+    airing_time = datetime.fromtimestamp(next_air['airingAt'] + 300)  # +5 min
 
     sch_id = await db.saveSchedule(
         name=ani_name,
@@ -136,7 +133,16 @@ async def add_schedule(client, message):
         timestamp=airing_time.timestamp()
     )
 
-    sch.add_job(process_scheduled_anime, 'date', run_date=airing_time, args=(sch_id,))
+    # THIS IS THE FIX – schedule job inside running loop
+    from bot import sch
+    sch.add_job(
+        process_scheduled_anime,
+        'date',
+        run_date=airing_time,
+        args=(sch_id,),
+        id=f"sch_{sch_id}",
+        replace_existing=True
+    )
 
     await sendMessage(message,
         f"<b>Scheduled Successfully!</b>\n"
@@ -144,10 +150,11 @@ async def add_schedule(client, message):
         f"<b>Time:</b> {airing_time.strftime('%Y-%m-%d %I:%M %p')} IST\n"
         f"<b>RSS:</b> {len(rss_links)} link(s)\n"
         f"<b>Platform:</b> {platform or 'Any'}\n"
-        f"<b>Audio Pref:</b> {audio_pref or 'Any'}\n"
-        f"<b>Title:</b> {custom_title or 'Auto'}"
+        f"<b>Audio:</b> {audio_pref or 'Any'}\n"
+        f"<b>Title:</b> {custom_title or 'Auto'}\n"
+        f"<b>ID:</b> <code>{sch_id}</code>"
     )
-
+    
 @bot.on_message(command('listschedule') & private & user(Var.ADMINS))
 @new_task
 async def list_schedules(client, message):
