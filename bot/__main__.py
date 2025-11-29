@@ -51,18 +51,20 @@ async def queue_loop():
         await asleep(10)
 
 async def main():
-    # Daily schedule post
     if Var.SEND_SCHEDULE:
-        sch.add_job(upcoming_animes, "cron", hour=0, minute=30)
+        from bot.modules.up_posts import upcoming_animes
+        sch.add_job(upcoming_animes, "cron", hour=0, minute=30, timezone="Asia/Kolkata")
 
     await bot.start()
     await restart()
-    LOGS.info('Auto Anime Bot Started! Now running on SCHEDULE mode only.')
 
+    # Start scheduler only AFTER event loop is running
     sch.start()
+    LOGS.info("Scheduler started!")
+
+    LOGS.info('Auto Anime Bot Started! Running in SCHEDULE mode.')
     bot_loop.create_task(queue_loop())
     await idle()
-
     LOGS.info('Bot stopping...')
     await bot.stop()
     for task in all_tasks():
