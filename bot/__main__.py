@@ -1,14 +1,13 @@
-from asyncio import create_task, create_subprocess_exec, create_subprocess_shell, run as asyrun, all_tasks, gather, sleep as asleep
+from asyncio import create_task, create_subprocess_exec, create_subprocess_shell, all_tasks, gather, sleep as asleep
 from aiofiles import open as aiopen
 from pyrogram import idle
-from pyrogram.filters import command, user
 from os import path as ospath, execl, kill
 from sys import executable
 from signal import SIGKILL
-from apscheduler.schedulers.asyncio import AsyncIOScheduler  # Import here
+from apscheduler.schedulers.asyncio import AsyncIOScheduler  # Import here for runtime use
 
-from bot import bot, Var, bot_loop, LOGS, ffQueue, ffLock, ffpids_cache, ff_queued
-from bot.core.auto_animes import fetch_animes  # Disabled
+from bot import bot, Var, bot_loop, LOGS, ffQueue, ffLock, ffpids_cache, ff_queued, ani_cache
+from bot.core.auto_animes import fetch_animes
 from bot.core.func_utils import clean_up, new_task, editMessage
 from bot.modules.up_posts import upcoming_animes
 
@@ -16,7 +15,8 @@ from bot.modules.up_posts import upcoming_animes
 @new_task
 async def restart(client, message):
     rmessage = await message.reply('<i>Restarting...</i>')
-    if 'sch' in globals() and sch.running:
+    global sch
+    if 'sch' in globals() and sch and sch.running:
         sch.shutdown(wait=False)
     await clean_up()
     if len(ffpids_cache) != 0: 
@@ -40,7 +40,7 @@ async def restart():
             await bot.edit_message_text(chat_id=chat_id, message_id=msg_id, text="<i>Restarted !</i>")
         except Exception as e:
             LOGS.error(e)
-
+            
 async def queue_loop():
     LOGS.info("Queue Loop Started !!")
     while True:
@@ -54,26 +54,31 @@ async def queue_loop():
         await asleep(10)
 
 async def main():
-    global sch  # Make global for access in commands
-    sch = AsyncIOScheduler(timezone="Asia/Kolkata", event_loop=bot_loop)  # CREATE HERE — loop is ready
-
-    # Add daily schedule if enabled
+    global sch  # Global for commands to access
+    
+    # CREATE SCHEDULER HERE — AFTER bot_loop is defined, but BEFORE bot.start()
+    sch = AsyncIOScheduler(timezone="Asia/Kolkata", event_loop=bot_loop)
+    
+    # Add daily job if enabled
     if Var.SEND_SCHEDULE:
         sch.add_job(upcoming_animes, "cron", hour=0, minute=30)
-
+    
     await bot.start()
     await restart()
-    sch.start()  # START HERE — after bot.start(), loop is fully running
-    LOGS.info('Scheduler started successfully!')
-
+    
+    # START SCHEDULER NOW — loop is fully running
+    sch.start()
+    LOGS.info("Scheduler started successfully!")
+    
     LOGS.info('Auto Anime Bot Started! Running in SCHEDULE mode.')
     bot_loop.create_task(queue_loop())
-    await fetch_animes()  # Idle loop (disabled)
+    bot_loop.create_task(fetch_animes())  # Idle task (disabled polling)
     await idle()
     LOGS.info('Auto Anime Bot Stopped!')
     await bot.stop()
-    sch.shutdown()
-    for task in all_tasks:
+    if sch:
+        sch.shutdown()
+    for task in all_tasks():
         task.cancel()
     await clean_up()
     LOGS.info('Finished AutoCleanUp !!')
