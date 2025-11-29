@@ -1,15 +1,46 @@
-FROM python:3.10-slim
+FROM python:3.10-alpine as base
 
-WORKDIR /usr/src/app
-RUN chmod 777 /usr/src/app
+RUN apk add --no-cache \
+    git \
+    wget \
+    pv \
+    jq \
+    mediainfo \
+    ffmpeg \
+    gcc \
+    musl-dev \
+    python3-dev \
+    libffi-dev \
+    openssl-dev \
+    cargo \
+    libjpeg-turbo \
+    libpng \
+    libwebp \
+    tiff \
+    openjpeg \
+    libimagequant \
+    freetype \
+    lcms2 \
+    zlib \
+    libgcc \
+    libstdc++ \
+    && apk add --no-cache --virtual .build-deps \
+    build-base \
+    && pip install --no-cache-dir --upgrade pip \
+    && apk del .build-deps
 
-RUN apt-get update && apt-get upgrade -y
-RUN apt-get install git wget pv jq python3-dev mediainfo gcc libsm6 libxext6 libfontconfig1 libxrender1 libgl1-mesa-glx -y
+ARG UID=1000
+RUN adduser -D -u $UID appuser
+WORKDIR /home/appuser/app
+RUN chown appuser:appuser /home/appuser/app
 
-COPY --from=mwader/static-ffmpeg:6.1 /ffmpeg /bin/ffmpeg
-COPY --from=mwader/static-ffmpeg:6.1 /ffprobe /bin/ffprobe
+COPY --chown=appuser:appuser requirements.txt .
+USER appuser
 
-COPY . .
-RUN pip3 install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --user -r requirements.txt
 
-CMD ["bash","run.sh"]
+COPY --chown=appuser:appuser . .
+
+ENV PATH="/home/appuser/.local/bin:${PATH}"
+
+CMD ["sh", "run.sh"]
