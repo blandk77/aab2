@@ -53,18 +53,18 @@ async def queue_loop():
 async def main():
     if Var.SEND_SCHEDULE:
         from bot.modules.up_posts import upcoming_animes
-        sch.add_job(upcoming_animes, "cron", hour=0, minute=30, timezone="Asia/Kolkata")
+        sch.add_job(upcoming_animes, "cron", hour=0, minute=30)
 
     await bot.start()
     await restart()
 
-    # Start scheduler only AFTER event loop is running
-    sch.start()
-    LOGS.info("Scheduler started!")
+    sch.start()  # Now safe — loop is running
+    LOGS.info("Scheduler started successfully!")
 
     LOGS.info('Auto Anime Bot Started! Running in SCHEDULE mode.')
     bot_loop.create_task(queue_loop())
     await idle()
+
     LOGS.info('Bot stopping...')
     await bot.stop()
     for task in all_tasks():
