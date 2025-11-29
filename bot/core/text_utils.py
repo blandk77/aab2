@@ -11,16 +11,15 @@ from .func_utils import handle_logs
 from .reporter import rep
 
 CAPTION_FORMAT = """
- <code>{title}</code>
+<code>{title}</code>
 <b>◇──◇──◇──◇──◇──◇──◇──◇</b>
-<b>✦</b> <i>Genres:</i> <code>{genres}</code>
-<b>✦</b> <i>Status:</i> <code>RELEASING</code> 
-<b>✦</b> <i>Source:</i> <code>Subsplease</code>
-<b>✦</b> <i>Episode:</i> <code>{ep_no}</code>
-<b>✦</b> <i>Audio:</i> <code>Japanese</code>
-<b>✦</b> <i>Subtitle:</i> <code>English</code>
+<b>Genre(s):</b> <code>{genres}</code>
+<b>Episode:</b> <code>{ep_no}</code>
+<b>Audio:</b> <code>{audio_lang}</code>
+<b>Subtitle:</b> <code>{sub_type}</code>
 <b>◇──◇──◇──◇──◇──◇──◇──◇</b>
-<blockquote><b>╭╌═╌═╌═╌══╌═╌═╌═╌═╌╮</b>          <b>✦</b> <b><i>Powered By ~</i></b> <i>{cred}</i>
+<blockquote expandable><b>Description:</b> {plot}</blockquote>
+<blockquote><b>╭╌═╌═╌═╌══╌═╌═╌═╌═╌╮</b>          <b>Powered By ~</i></b> <i>{cred}</i>
 <b>╰╌═╌═╌═╌═╌═╌═╌═╌══╌╯</b></blockquote>
 """
 
@@ -194,17 +193,19 @@ class TextEditor:
         return "https://files.catbox.moe/z69m7i.jpg"
         
     @handle_logs
-    async def get_upname(self, qual=""):
-        anime_name = self.pdata.get("anime_title")
-        codec = 'HEVC' if 'libx265' in ffargs[qual] else 'AV1' if 'libaom-av1' in ffargs[qual] else ''
-        lang = 'Multi-Audio' if 'multi-audio' in self.__name.lower() else 'Sub'
-        anime_season = str(ani_s[-1]) if (ani_s := self.pdata.get('anime_season', '01')) and isinstance(ani_s, list) else str(ani_s)
-        if anime_name and self.pdata.get("episode_number"):
-            titles = self.adata.get('title', {})
-            return f"""[S{anime_season}-{'E'+str(self.pdata.get('episode_number')) if self.pdata.get('episode_number') else ''}] {titles.get('english') or titles.get('romaji') or titles.get('native')} {'['+qual+'p]' if qual else ''} {'['+codec.upper()+'] ' if codec else ''}{'['+lang+']'} {Var.BRAND_UNAME}.mkv"""
+    async def get_upname(self, qual="", custom_title=None, audio_type="Sub"):
+        season = self.pdata.get("anime_season", "1")
+        if isinstance(season, list):
+            season = season[-1]
+        ep = self.pdata.get("episode_number") or "??"
+        title_use = custom_title or (self.adata.get('title', {}).get('english') or
+                                   self.adata.get('title', {}).get('romaji') or
+                                   self.pdata.get("anime_title"))
+        return f"[S{season}-E{ep}] {title_use} [{qual}p] [{audio_type}] {Var.BRAND_UNAME}.mkv"
+
 
     @handle_logs
-    async def get_caption(self):
+    async def get_caption(self, audio_lang="Japanese", sub_type="English"):
         sd = self.adata.get('startDate', {})
         startdate = f"{month_name[sd['month']]} {sd['day']}, {sd['year']}" if sd.get('day') and sd.get('year') else ""
         ed = self.adata.get('endDate', {})
@@ -212,15 +213,11 @@ class TextEditor:
         titles = self.adata.get("title", {})
         
         return CAPTION_FORMAT.format(
-                title=titles.get('english') or titles.get('romaji') or title.get('native'),
-                form=self.adata.get("format") or "N/A",
-                genres=", ".join(f"{GENRES_EMOJI[x]} #{x.replace(' ', '_').replace('-', '_')}" for x in (self.adata.get('genres') or [])),
-                avg_score=f"{sc}%" if (sc := self.adata.get('averageScore')) else "N/A",
-                status=self.adata.get("status") or "N/A",
-                start_date=startdate or "N/A",
-                end_date=enddate or "N/A",
-                t_eps=self.adata.get("episodes") or "N/A",
-                plot= (desc if (desc := self.adata.get("description") or "N/A") and len(desc) < 200 else desc[:200] + "..."),
-                ep_no=self.pdata.get("episode_number"),
-                cred=Var.BRAND_UNAME,
-            )
+            title=titles.get('english') or titles.get('romaji') or titles.get('native'),
+            genres=", ".join(f"{GENRES_EMOJI.get(g, '')} #{g.replace(' ', '_')}" for g in (self.adata.get('genres') or [])),
+            ep_no=self.pdata.get("episode_number"),
+            audio_lang=audio_lang,
+            sub_type=sub_type,
+            plot=(desc[:300] + "..." if len(desc := self.adata.get("description") or "") > 300 else desc),
+            cred=Var.BRAND_UNAME
+        )
