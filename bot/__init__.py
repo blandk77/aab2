@@ -2,7 +2,7 @@ from os import path as ospath, mkdir, system, getenv
 from logging import INFO, ERROR, FileHandler, StreamHandler, basicConfig, getLogger
 from traceback import format_exc
 from asyncio import Queue, Lock
-
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from pyrogram import Client
 from pyrogram.enums import ParseMode
 from dotenv import load_dotenv
