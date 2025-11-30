@@ -1,4 +1,3 @@
-import asyncio
 from os import path as ospath, mkdir, system, getenv
 from logging import INFO, ERROR, FileHandler, StreamHandler, basicConfig, getLogger
 from traceback import format_exc
@@ -7,9 +6,7 @@ from asyncio import Queue, Lock
 from pyrogram import Client
 from pyrogram.enums import ParseMode
 from dotenv import load_dotenv
-from uvloop import install
 
-install()
 basicConfig(format="[%(asctime)s] [%(name)s | %(levelname)s] - %(message)s [%(filename)s:%(lineno)d]",
             datefmt="%m/%d/%Y, %H:%M:%S %p",
             handlers=[FileHandler('log.txt'), StreamHandler()],
@@ -19,8 +16,6 @@ getLogger("pyrogram").setLevel(ERROR)
 LOGS = getLogger(__name__)
 
 load_dotenv('config.env')
-
-LOGS.info(f"Before Client: running loop = {asyncio.get_event_loop_policy().get_event_loop()}")
 
 ani_cache = {
     'fetch_animes': True,
@@ -76,7 +71,7 @@ if not ospath.isdir("downloads/"):
 
 try:
     bot = Client(name="AutoAniAdvance", api_id=Var.API_ID, api_hash=Var.API_HASH, bot_token=Var.BOT_TOKEN, plugins=dict(root="bot/modules"), parse_mode=ParseMode.HTML)
-    bot_loop = None
+    bot_loop = bot.loop
 except Exception as ee:
     LOGS.error(str(ee))
     exit(1)
