@@ -8,6 +8,8 @@ from signal import SIGKILL
 from bot import bot, Var, bot_loop, LOGS, ffQueue, ffLock, ffpids_cache, ff_queued, sch
 from bot.core.func_utils import clean_up, new_task, editMessage
 from bot.modules.up_posts import upcoming_animes
+from app import web_server
+
 
 @bot.on_message(command('restart') & user(Var.ADMINS))
 @new_task
