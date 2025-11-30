@@ -1,3 +1,4 @@
+import asyncio
 from os import path as ospath, mkdir, system, getenv
 from logging import INFO, ERROR, FileHandler, StreamHandler, basicConfig, getLogger
 from traceback import format_exc
@@ -18,6 +19,8 @@ getLogger("pyrogram").setLevel(ERROR)
 LOGS = getLogger(__name__)
 
 load_dotenv('config.env')
+
+LOGS.info(f"Before Client: running loop = {asyncio.get_event_loop_policy().get_event_loop()}")
 
 ani_cache = {
     'fetch_animes': True,
