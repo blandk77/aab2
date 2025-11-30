@@ -4,8 +4,7 @@ from aiofiles.os import remove as aioremove
 from time import time
 from datetime import datetime
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
-from pyrogram.errors import MessageNotFound
-
+from pyrogram.errors import BadRequest
 from bot import bot, Var, ani_cache, ffQueue, ffLock, ff_queued, sch
 from .tordownload import TorDownloader
 from .database import db
@@ -56,7 +55,7 @@ async def process_scheduled_anime(sch_id):
                     await rep.report(f"Already uploaded: {title}", "info")
                     await db.delSchedule(sch_id)
                     return
-            except:
+            except BadRequest:
                 pass
 
             # Download
