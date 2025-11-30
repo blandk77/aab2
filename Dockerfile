@@ -1,46 +1,18 @@
-FROM python:3.10-alpine as base
+FROM python:3.10-slim-buster
 
-RUN apk add --no-cache \
-    git \
-    wget \
-    pv \
-    jq \
-    mediainfo \
-    ffmpeg \
-    gcc \
-    musl-dev \
-    python3-dev \
-    libffi-dev \
-    openssl-dev \
-    cargo \
-    libjpeg-turbo \
-    libpng \
-    libwebp \
-    tiff \
-    openjpeg \
-    libimagequant \
-    freetype \
-    lcms2 \
-    zlib \
-    libgcc \
-    libstdc++ \
-    && apk add --no-cache --virtual .build-deps \
-    build-base \
-    && pip install --no-cache-dir --upgrade pip \
-    && apk del .build-deps
+WORKDIR /usr/src/app
+RUN chmod 777 /usr/src/app
 
-ARG UID=1000
-RUN adduser -D -u $UID appuser
-WORKDIR /home/appuser/app
-RUN chown appuser:appuser /home/appuser/app
+RUN sed -i 's/deb.debian.org/archive.debian.org/g' /etc/apt/sources.list && \
+    sed -i '/security.debian.org/d' /etc/apt/sources.list
 
-COPY --chown=appuser:appuser requirements.txt .
-USER appuser
+RUN apt-get update && apt-get upgrade -y
+RUN apt-get install git wget pv jq python3-dev mediainfo gcc libsm6 libxext6 libfontconfig1 libxrender1 libgl1-mesa-glx -y
 
-RUN pip install --no-cache-dir --user -r requirements.txt
+COPY --from=mwader/static-ffmpeg:6.1 /ffmpeg /bin/ffmpeg
+COPY --from=mwader/static-ffmpeg:6.1 /ffprobe /bin/ffprobe
 
-COPY --chown=appuser:appuser . .
+COPY . .
+RUN pip3 install --no-cache-dir -r requirements.txt
 
-ENV PATH="/home/appuser/.local/bin:${PATH}"
-
-CMD ["sh", "run.sh"]
+CMD ["bash","run.sh"]
