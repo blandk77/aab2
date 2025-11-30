@@ -7,7 +7,7 @@ from pyrogram.filters import command, user
 from os import path as ospath, execl, kill
 from sys import executable
 from signal import SIGKILL
-
+from app import web_server
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from bot import bot, Var, LOGS, ffQueue, ffLock, ffpids_cache, ff_queued
@@ -87,8 +87,8 @@ async def main():
 
     # start background tasks on the bot's loop
     bot_loop.create_task(queue_loop())
-    # fetch_animes likely should be a background task; don't await it directly if it's a long-running loop
     bot_loop.create_task(fetch_animes())
+    bot_loop.create_task(web_server())
 
     try:
         await idle()
