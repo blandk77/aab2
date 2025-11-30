@@ -6,7 +6,6 @@ from os import path as ospath, execl, kill
 from sys import executable
 from signal import SIGKILL
 from bot import bot, Var, bot_loop, LOGS, ffQueue, ffLock, ffpids_cache, ff_queued, sch
-from bot.core.auto_animes import fetch_animes
 from bot.core.func_utils import clean_up, new_task, editMessage
 from bot.modules.up_posts import upcoming_animes
 
@@ -63,7 +62,6 @@ async def main():
 
     LOGS.info('Auto Anime Bot Started! Running in SCHEDULE mode.')
     bot_loop.create_task(queue_loop())
-    await fetch_animes()  # Idle loop (disabled)
     await idle()
     LOGS.info('Auto Anime Bot Stopped!')
     await bot.stop()
