@@ -7,7 +7,7 @@ from sys import executable
 from signal import SIGKILL
 from apscheduler.schedulers.asyncio import AsyncIOScheduler  # Import here
 
-from bot import bot, Var, bot_loop, LOGS, ffQueue, ffLock, ffpids_cache, ff_queued
+from bot import bot, Var, bot_loop, LOGS, ffQueue, ffLock, ffpids_cache, ff_queued, sch
 from bot.core.auto_animes import fetch_animes  # Disabled
 from bot.core.func_utils import clean_up, new_task, editMessage
 from bot.modules.up_posts import upcoming_animes
@@ -54,9 +54,7 @@ async def queue_loop():
         await asleep(10)
 
 async def main():
-    global sch
-    sch = AsyncIOScheduler(timezone="Asia/Kolkata", event_loop=bot_loop)  # CREATE HERE — loop is ready
-
+    
     if Var.SEND_SCHEDULE:
         sch.add_job(upcoming_animes, "cron", hour=0, minute=30)
 
