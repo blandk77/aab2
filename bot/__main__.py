@@ -52,17 +52,18 @@ async def queue_loop():
 
 async def main():
     
-    if Var.SEND_SCHEDULE:
-        sch.add_job(upcoming_animes, "cron", hour=0, minute=30)
-
     await bot.start()
     await restart()
-    sch.start()  # START HERE — after bot.start(), loop is fully running
+    sch.start()
     LOGS.info('Scheduler started successfully!')
 
+    if Var.SEND_SCHEDULE:
+        sch.add_job(upcoming_animes, "cron", hour=0, minute=30)
+        
     LOGS.info('Auto Anime Bot Started! Running in SCHEDULE mode.')
     bot_loop.create_task(queue_loop())
     await idle()
+    bot_loop.create_task(web_server())
     LOGS.info('Auto Anime Bot Stopped!')
     await bot.stop()
     sch.shutdown()
