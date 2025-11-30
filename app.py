@@ -1,10 +1,9 @@
-from flask import Flask
-app = Flask(__name__)
+from aiohttp import web
 
-@app.route('/')
-def hello_world():
-    return 'Status: Working.....'
+async def ping(request):
+    return web.Response(text="OK")
 
-
-if __name__ == "__main__":
-    app.run()
+def web_server():
+    app = web.Application()
+    app.add_routes([web.get("/", ping)])
+    web.run_app(app, host="0.0.0.0", port=7860)
