@@ -1,34 +1,25 @@
-# bot/__main__.py
-import asyncio
-from asyncio import create_subprocess_exec, all_tasks, sleep as asleep
+from asyncio import create_task, create_subprocess_exec, create_subprocess_shell, run as asyrun, all_tasks, gather, sleep as asleep
 from aiofiles import open as aiopen
 from pyrogram import idle
 from pyrogram.filters import command, user
 from os import path as ospath, execl, kill
 from sys import executable
 from signal import SIGKILL
-from app import web_server
-from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.schedulers.asyncio import AsyncIOScheduler  # Import here
 
-from bot import bot, Var, LOGS, ffQueue, ffLock, ffpids_cache, ff_queued
-from bot.core.auto_animes import fetch_animes
+from bot import bot, Var, bot_loop, LOGS, ffQueue, ffLock, ffpids_cache, ff_queued
+from bot.core.auto_animes import fetch_animes  # Disabled
 from bot.core.func_utils import clean_up, new_task, editMessage
 from bot.modules.up_posts import upcoming_animes
 
-# event handlers can remain here
 @bot.on_message(command('restart') & user(Var.ADMINS))
 @new_task
-async def restart_handler(client, message):
+async def restart(client, message):
     rmessage = await message.reply('<i>Restarting...</i>')
-    # shutdown scheduler safely if exists
-    try:
-        if globals().get("sch") and sch.running:
-            sch.shutdown(wait=False)
-    except Exception:
-        LOGS.exception("Error shutting down scheduler during restart")
-
+    if 'sch' in globals() and sch.running:
+        sch.shutdown(wait=False)
     await clean_up()
-    if ffpids_cache:
+    if len(ffpids_cache) != 0: 
         for pid in ffpids_cache:
             try:
                 LOGS.info(f"Process ID : {pid}")
@@ -41,7 +32,7 @@ async def restart_handler(client, message):
         await f.write(f"{rmessage.chat.id}\n{rmessage.id}\n")
     execl(executable, executable, "-m", "bot")
 
-async def restart_message_edit():
+async def restart():
     if ospath.isfile(".restartmsg"):
         with open(".restartmsg") as f:
             chat_id, msg_id = map(int, f)
@@ -63,50 +54,28 @@ async def queue_loop():
         await asleep(10)
 
 async def main():
-    global sch, bot_loop
+    global sch
+    sch = AsyncIOScheduler(timezone="Asia/Kolkata", event_loop=bot_loop)  # CREATE HERE — loop is ready
 
-    # START the client — this creates the event loop used by pyrogram
-    await bot.start()
-    bot_loop = bot.loop  # safe now
-
-    # create scheduler bound to the running loop
-    sch = AsyncIOScheduler(timezone="Asia/Kolkata", event_loop=bot_loop)
-
-    # add job only if configured
     if Var.SEND_SCHEDULE:
         sch.add_job(upcoming_animes, "cron", hour=0, minute=30)
 
-    # start scheduler
-    sch.start()
-    LOGS.info("Scheduler started successfully!")
-
-    # post-restart message edit if any
-    await restart_message_edit()
+    await bot.start()
+    await restart()
+    sch.start()  # START HERE — after bot.start(), loop is fully running
+    LOGS.info('Scheduler started successfully!')
 
     LOGS.info('Auto Anime Bot Started! Running in SCHEDULE mode.')
-
-    # start background tasks on the bot's loop
     bot_loop.create_task(queue_loop())
-    bot_loop.create_task(fetch_animes())
-    bot_loop.create_task(web_server())
-
-    try:
-        await idle()
-    finally:
-        LOGS.info('Auto Anime Bot Stopping...')
-        # stop everything cleanly
-        if sch:
-            sch.shutdown(wait=False)
-        await bot.stop()
-        # cancel remaining tasks
-        for task in list(all_tasks()):
-            try:
-                task.cancel()
-            except Exception:
-                pass
-        await clean_up()
-        LOGS.info('Finished AutoCleanUp !!')
-
+    await fetch_animes()  # Idle loop (disabled)
+    await idle()
+    LOGS.info('Auto Anime Bot Stopped!')
+    await bot.stop()
+    sch.shutdown()
+    for task in all_tasks:
+        task.cancel()
+    await clean_up()
+    LOGS.info('Finished AutoCleanUp !!')
+    
 if __name__ == '__main__':
-    # Use asyncio.run to create and run the uvloop-compatible loop
-    asyncio.run(main())
+    bot_loop.run_until_complete(main())
