@@ -84,7 +84,8 @@ class AniLister:
     async def post_data(self):
         async with ClientSession() as sess:
             async with sess.post(self.__api, json={'query': ANIME_GRAPHQL_QUERY, 'variables': self.__vars}) as resp:
-                return (resp.status, await resp.json())
+                json_data = await resp.json() if resp.status == 200 else None
+                return (resp.status, json_data)
 
     async def get_anidata(self):
         # Primary query with year
@@ -92,7 +93,13 @@ class AniLister:
         await rep.report(f"Trying AniList query: '{self.__ani_name}' (year {self.__original_year})", "info", log=False)
         status, data = await self.post_data()
 
-        media_list = data.get('data', {}).get('Page', {}).get('media', [])
+        # FIXED: Guard against None data
+        if data is None or not isinstance(data, dict):
+            await rep.report(f"Bad API response for '{self.__ani_name}': status {status}, data {data}", "warning", log=False)
+            media_list = []
+        else:
+            media_list = data.get('data', {}).get('Page', {}).get('media', [])
+        
         if media_list:
             await rep.report(f"Found {len(media_list)} results for '{self.__ani_name}'", "info", log=False)
             return media_list
@@ -103,7 +110,11 @@ class AniLister:
             await asleep(1)
             await rep.report(f"404 → retrying '{self.__ani_name}' with year {self.__current_year}", "warning", log=False)
             status, data = await self.post_data()
-            media_list = data.get('data', {}).get('Page', {}).get('media', [])
+            if data is None or not isinstance(data, dict):
+                await rep.report(f"Bad fallback response: status {status}", "warning", log=False)
+                media_list = []
+            else:
+                media_list = data.get('data', {}).get('Page', {}).get('media', [])
             if media_list:
                 await rep.report(f"Found {len(media_list)} in fallback year {self.__current_year}", "info", log=False)
                 return media_list
@@ -112,7 +123,11 @@ class AniLister:
         self.__vars = {'search': self.__ani_name, 'perPage': 5}
         await rep.report(f"Year fallback failed → no-year search for '{self.__ani_name}'", "warning", log=False)
         status, data = await self.post_data()
-        media_list = data.get('data', {}).get('Page', {}).get('media', [])
+        if data is None or not isinstance(data, dict):
+            await rep.report(f"Bad no-year response: status {status}", "warning", log=False)
+            media_list = []
+        else:
+            media_list = data.get('data', {}).get('Page', {}).get('media', [])
         if media_list:
             await rep.report(f"No-year search success: {len(media_list)} results", "info", log=False)
             return media_list
@@ -123,7 +138,11 @@ class AniLister:
             self.__vars = {'search': normalized, 'perPage': 5}
             await rep.report(f"Trying normalized: '{normalized}'", "warning", log=False)
             status, data = await self.post_data()
-            media_list = data.get('data', {}).get('Page', {}).get('media', [])
+            if data is None or not isinstance(data, dict):
+                await rep.report(f"Bad normalized response: status {status}", "warning", log=False)
+                media_list = []
+            else:
+                media_list = data.get('data', {}).get('Page', {}).get('media', [])
             if media_list:
                 await rep.report(f"Normalized success: {len(media_list)} results", "info", log=False)
                 return media_list
@@ -134,9 +153,9 @@ class AniLister:
     async def get_anidata_by_id(self):
         self.__vars = {'id': int(self.__ani_name.split(':')[1]), 'perPage': 1}
         status, data = await self.post_data()
-        if status == 200:
-            return data.get('data', {}).get('Page', {}).get('media', [{}])[0] or {}
-        return {}
+        if data is None or not isinstance(data, dict) or status != 200:
+            return {}
+        return data.get('data', {}).get('Page', {}).get('media', [{}])[0] or {}
 
 async def search_anilist_multiple(query: str, max_results: int = 5):
     """Search AniList for multiple results (returns list)"""
@@ -144,7 +163,8 @@ async def search_anilist_multiple(query: str, max_results: int = 5):
     media_list = await anilister.get_anidata()
     return media_list[:max_results]
 
-# ... (keep TextEditor class unchanged from previous version)
+
+
 class TextEditor:
     def __init__(self, name):
         self.__name = name
