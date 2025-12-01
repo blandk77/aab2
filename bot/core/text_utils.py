@@ -4,7 +4,7 @@ from random import choice
 from asyncio import sleep as asleep
 from aiohttp import ClientSession
 from anitopy import parse
-from re import sub
+import re
 
 from bot import Var, bot
 from .ffencoder import ffargs
@@ -55,6 +55,19 @@ query ($id: Int, $search: String, $seasonYear: Int, $perPage: Int) {
 }
 """
 
+def clean_rss_title(raw_title: str) -> str:
+    """Clean RSS title for AniList search: remove uploader, ep, quality, junk."""
+    # Remove common uploader tags
+    for tag in ["[ToonsHub]", "[VARYG]", "[Erai-raws]", "[SubsPlease]", "[Judas]", "[EMBER]", "[Bili]", "(Multi-Subs)"]:
+        raw_title = raw_title.replace(tag, "").strip()
+    
+    # Remove episode/quality patterns
+    raw_title = re.sub(r'S\d+E\d+|Ep\.?\s*\d+|1080p|720p|480p|360p|WEB-DL|AAC\d\.\d|H\.265|H\.264|\d+p', '', raw_title)
+    raw_title = re.sub(r'[-–] .*', '', raw_title)  # Everything after " - "
+    raw_title = re.sub(r'\s*\(.*\)', '', raw_title)  # Parentheticals
+    raw_title = re.sub(r'[!\?\.]+$', '', raw_title)  # Trailing punctuation
+    return raw_title.strip()
+
 class AniLister:
     def __init__(self, anime_name: str, year: int = None) -> None:
         self.__api = "https://graphql.anilist.co"
@@ -77,32 +90,30 @@ class AniLister:
 
         while status == 404 and self.__current_year > self.__original_year - 5:
             self.__update_vars()
-            await asleep(1)  # Rate limit
+            await asleep(1)
             status, data = await self.post_data()
 
         if status == 404:
-            self.__vars = {'search': self.__ani_name, 'perPage': 5}  # No year fallback
+            self.__vars = {'search': self.__ani_name, 'perPage': 5}
             status, data = await self.post_data()
 
         if status == 200:
-            return data.get('data', {}).get('Page', {}).get('media', [{}])[0] or {}
-        return {}
+            media_list = data.get('data', {}).get('Page', {}).get('media', [])
+            return media_list if media_list else []
+        return []
 
     async def get_anidata_by_id(self):
-        self.__vars = {'id': int(self.__ani_name.split(':')[1]), 'perPage': 1}  # ID mode
+        self.__vars = {'id': int(self.__ani_name.split(':')[1]), 'perPage': 1}
         status, data = await self.post_data()
         if status == 200:
             return data.get('data', {}).get('Page', {}).get('media', [{}])[0] or {}
         return {}
 
 async def search_anilist_multiple(query: str, max_results: int = 5):
-    """Search AniList for multiple results"""
+    """Search AniList for multiple results (returns list)"""
     anilister = AniLister(query)
-    results = await anilister.get_anidata()  # Returns first, but vars has perPage=5
-    # Actually, get_anidata returns first match — adjust to Page
-    if isinstance(results, list):
-        return results[:max_results]
-    return [results] if results else []
+    media_list = await anilister.get_anidata()
+    return media_list[:max_results]
 
 class TextEditor:
     def __init__(self, name):
