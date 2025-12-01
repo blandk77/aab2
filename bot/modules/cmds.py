@@ -142,12 +142,9 @@ async def edit_schedule(client, message):
 @new_task
 async def add_schedule(client, message):
     if len(args := message.text.split(maxsplit=1)) <= 1:
-        return await sendMessage(message, 
-            "<b>Usage:</b> /addschedule rss1,rss2|platform|audio|rename_title|anilist_search_title\n"
-            "<i>Example: https://nyaa.si/?page=rss&q=Blue+Lock|CR|Dual|Blue Lock S2|Sawaranaide Kotesashi-kun</i>\n"
-            "<i>Use 'None' for optional fields. If no anilist_search_title, auto-parses RSS.</i>")
+        return await sendMessage(message, "<b>Usage:</b> /addschedule rss1,rss2|platform|audio|rename_title|anilist_search_title")
 
-    parts = args[1].split('|', 4)  # Up to 5 parts now
+    parts = args[1].split('|', 4)
     rss_raw = parts[0].strip()
     platform = parts[1].strip() if len(parts) > 1 and parts[1].lower() != 'none' else None
     audio_pref = parts[2].strip() if len(parts) > 2 and parts[2].lower() != 'none' else None
@@ -162,22 +159,17 @@ async def add_schedule(client, message):
     if anilist_search:
         search_query = anilist_search
     else:
-        # Auto-parse RSS title cleanly
         feed = await getfeed(rss_links[0])
         if not feed:
             return await sendMessage(message, "<b>First RSS invalid!</b>")
         search_query = clean_rss_title(feed.title) or rename_title or "Unknown Anime"
-    
-    # Log the query for debugging
+
     await rep.report(f"AniList search query: '{search_query}' for RSS: {rss_raw[:50]}...", "info")
 
-    # Search AniList
     results = await search_anilist_multiple(search_query)
     if not results:
-        await rep.report(f"AniList empty for '{search_query}'", "warning")  # Now logs!
-        return await sendMessage(message, 
-            f"<b>No AniList results for '{search_query}'</b>\n"
-            f"<i>Try providing exact anilist_search_title like 'Sawaranaide Kotesashi-kun'</i>")
+        await rep.report(f"AniList empty for '{search_query}'", "warning")
+        return await sendMessage(message, f"<b>No AniList results for '{search_query}'</b>")
 
     # Build buttons
     buttons = []
@@ -192,17 +184,16 @@ async def add_schedule(client, message):
         buttons.append([InlineKeyboardButton(btn_text[:60], callback_data=f"ani_{res['id']}")])
 
     markup = InlineKeyboardMarkup(buttons)
-    picker_text = f"<b>Found {len(results)} results for '{search_query}':</b>\n\n<i>Click to schedule. Logs: {len(results)} hits.</i>"
+    picker_text = f"<b>Found {len(results)} results for '{search_query}':</b>\n\n<i>Click to schedule.</i>"
     msg = await sendMessage(message, picker_text, markup)
 
-    # Store temp data
     temp_schedule_data[msg.id] = {
         'rss_links': rss_links,
         'platform': platform,
         'audio_pref': audio_pref,
-        'rename_title': rename_title,  # For filename
+        'rename_title': rename_title,
         'search_query': search_query
-}
+    }
     
 # ============ CALLBACK HANDLER FOR PICKER ============
 @bot.on_callback_query(regex(r'^ani_'))
