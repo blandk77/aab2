@@ -9,7 +9,9 @@ from bot.core.database import db
 from bot.core.func_utils import decode, is_fsubbed, get_fsubs, editMessage, sendMessage, new_task, convertTime, getfeed
 from bot.core.auto_animes import process_scheduled_anime
 from bot.core.reporter import rep
-from bot.core.text_utils import AniLister
+from bot.core.text_utils import AniLister, search_anilist_multiple
+
+temp_schedule_data = {}
 
 @bot.on_message(command('start') & private)
 @new_task
@@ -95,65 +97,6 @@ async def _log(client, message):
 
 # ============ NEW SCHEDULE COMMANDS ============
 
-@bot.on_message(command('addschedule') & private & user(Var.ADMINS))
-@new_task
-async def add_schedule(client, message):
-    if len(args := message.text.split(maxsplit=1)) <= 1:
-        return await sendMessage(message, "<b>Usage: /addschedule rss_link1,rss_link2|platform|audio|title\nUse 'None' for optional fields</b>")
-
-    parts = args[1].split('|', 3)
-    rss_raw = parts[0].strip()
-    platform = parts[1].strip() if len(parts) > 1 and parts[1].strip().lower() != 'none' else None
-    audio_pref = parts[2].strip() if len(parts) > 2 and parts[2].strip().lower() != 'none' else None
-    custom_title = parts[3].strip() if len(parts) > 3 and parts[3].strip().lower() != 'none' else None
-
-    rss_links = [link.strip() for link in rss_raw.split(',') if link.strip()]
-    if not rss_links:
-        return await sendMessage(message, "<b>No valid RSS links!</b>")
-
-    feed = await getfeed(rss_links[0])
-    if not feed:
-        return await sendMessage(message, "<b>First RSS invalid!</b>")
-    ani_name = feed.title.split(' - ')[0].replace('[Toonshub]', '').replace('[VARYG]', '').replace('[Erai-raws]', '').strip()
-
-    anilister = AniLister(ani_name, datetime.now().year)
-    ani_data = await anilister.get_anidata()
-    next_air = ani_data.get('nextAiringEpisode')
-    if not next_air:
-        return await sendMessage(message, "<b>No upcoming episode on AniList!</b>")
-
-    airing_time = datetime.fromtimestamp(next_air['airingAt'] + 300)  # +5 min
-
-    sch_id = await db.saveSchedule(
-        name=ani_name,
-        rss_links=rss_links,
-        platform=platform,
-        audio_pref=audio_pref,
-        custom_title=custom_title,
-        timestamp=airing_time.timestamp()
-    )
-
-    # THIS IS THE FIX – schedule job inside running loop
-    from bot import sch
-    sch.add_job(
-        process_scheduled_anime,
-        'date',
-        run_date=airing_time,
-        args=(sch_id,),
-        id=f"sch_{sch_id}",
-        replace_existing=True
-    )
-
-    await sendMessage(message,
-        f"<b>Scheduled Successfully!</b>\n"
-        f"<b>Anime:</b> {ani_name}\n"
-        f"<b>Time:</b> {airing_time.strftime('%Y-%m-%d %I:%M %p')} IST\n"
-        f"<b>RSS:</b> {len(rss_links)} link(s)\n"
-        f"<b>Platform:</b> {platform or 'Any'}\n"
-        f"<b>Audio:</b> {audio_pref or 'Any'}\n"
-        f"<b>Title:</b> {custom_title or 'Auto'}\n"
-        f"<b>ID:</b> <code>{sch_id}</code>"
-    )
     
 @bot.on_message(command('listschedule') & private & user(Var.ADMINS))
 @new_task
@@ -194,3 +137,102 @@ async def edit_schedule(client, message):
         await sendMessage(message, f"<b>Updated {sch_id} → {pref}</b>")
     else:
         await sendMessage(message, "<b>ID not found!</b>")
+
+@bot.on_message(filters.command('addschedule') & filters.private & filters.user(Var.ADMINS))
+@new_task
+async def add_schedule(client, message):
+    if len(args := message.text.split(maxsplit=1)) <= 1:
+        return await sendMessage(message, "<b>Usage:</b> /addschedule rss1,rss2|platform|audio|custom_title\n<i>Example: https://nyaa.si/rss?q=Blue+Lock|CR|Dual|Blue Lock S2</i>")
+
+    parts = args[1].split('|', 3)
+    rss_raw = parts[0].strip()
+    platform = parts[1].strip() if len(parts) > 1 and parts[1].lower() != 'none' else None
+    audio_pref = parts[2].strip() if len(parts) > 2 and parts[2].lower() != 'none' else None
+    custom_title = parts[3].strip() if len(parts) > 3 and parts[3].lower() != 'none' else None
+
+    rss_links = [link.strip() for link in rss_raw.split(',') if link.strip()]
+    if not rss_links:
+        return await sendMessage(message, "<b>No valid RSS links!</b>")
+
+    # Derive search query from custom_title or RSS
+    search_query = custom_title or (await getfeed(rss_links[0])).title.split(' - ')[0].split(' [')[0].strip()
+
+    # Search AniList for multiple results
+    results = await search_anilist_multiple(search_query)
+    if not results:
+        return await sendMessage(message, f"<b>No AniList results for '{search_query}'</b>\n<i>Try exact title like 'Blue Lock Season 2'</i>")
+
+    # Build inline keyboard
+    buttons = []
+    for idx, res in enumerate(results[:5]):  # Top 5 only
+        title = res['title']['english'] or res['title']['romaji']
+        year = res.get('seasonYear', 'N/A')
+        status = res.get('status', 'Unknown')
+        next_ep = res.get('nextAiringEpisode', {}).get('episode', 'N/A')
+        btn_text = f"{title} ({year}) – {status}"
+        if next_ep != 'N/A':
+            btn_text += f" | Ep {next_ep}"
+        buttons.append([InlineKeyboardButton(btn_text[:60], callback_data=f"ani_{res['id']}")])  # Short callback: ani_ID
+
+    markup = InlineKeyboardMarkup(buttons)
+    msg = await sendMessage(message, f"<b>Found {len(results)} results for '{search_query}':</b>\n\n<i>Click the correct anime to schedule with your RSS ({len(rss_links)} links) + {platform or 'Any'} + {audio_pref or 'Any'}</i>", markup)
+
+    # Store temp data (message_id + params) in a global dict or DB — here using global for simplicity
+    from bot import temp_schedule_data
+    temp_schedule_data[msg.id] = {
+        'rss_links': rss_links,
+        'platform': platform,
+        'audio_pref': audio_pref,
+        'custom_title': custom_title,
+        'search_query': search_query
+    }
+
+# ============ CALLBACK HANDLER FOR PICKER ============
+@bot.on_callback_query(filters.regex(r'^ani_'))
+@new_task
+async def handle_anilist_pick(client: CallbackQuery):
+    data = client.data
+    ani_id = int(data.split('_')[1])
+
+    # Get full data by ID
+    anilister = AniLister(f"id:{ani_id}")
+    ani_data = await anilister.get_anidata_by_id()  # New method below
+    if not ani_data:
+        return await client.answer("Failed to fetch details — try again!", show_alert=True)
+
+    # Get message & temp data
+    msg = client.message
+    temp_data = temp_schedule_data.get(msg.id)
+    if not temp_data:
+        return await client.answer("Session expired — restart /addschedule!", show_alert=True)
+
+    # Schedule it
+    next_air = ani_data.get('nextAiringEpisode')
+    if not next_air:
+        return await client.answer("No upcoming episode — pick another!", show_alert=True)
+
+    airing_time = datetime.fromtimestamp(next_air['airingAt'] + 300)  # +5min
+    sch_id = await db.saveSchedule(
+        name=ani_data['title']['english'] or ani_data['title']['romaji'],
+        rss_links=temp_data['rss_links'],
+        platform=temp_data['platform'],
+        audio_pref=temp_data['audio_pref'],
+        custom_title=temp_data['custom_title'],
+        timestamp=airing_time.timestamp()
+    )
+
+    sch.add_job(process_scheduled_anime, 'date', run_date=airing_time, args=(sch_id,), id=f"sch_{sch_id}")
+
+    # Edit picker to success
+    success_text = f"<b>✅ Scheduled Successfully!</b>\n\n<b>Anime:</b> {ani_data['title']['english'] or ani_data['title']['romaji']}\n<b>Next Ep:</b> {airing_time.strftime('%Y-%m-%d %I:%M %p')} IST\n<b>ID:</b> <code>{sch_id}</code>"
+    await editMessage(msg, success_text)
+
+    # Send new message with poster
+    poster_url = f"https://img.anili.st/media/{ani_id}"
+    caption = f"<b>Added to Schedule:</b>\n{ani_data.get('title', {}).get('english', 'N/A')}\n\n<i>RSS: {len(temp_data['rss_links'])} | Platform: {temp_data['platform'] or 'Any'} | Audio: {temp_data['audio_pref'] or 'Any'} | Rename: {temp_data['custom_title'] or 'Auto'}</i>"
+    await client.message.reply_photo(photo=poster_url, caption=caption)
+
+    # Cleanup temp
+    del temp_schedule_data[msg.id]
+    await client.answer("Scheduled! Check /listschedule.", show_alert=False)
+                                 
