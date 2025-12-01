@@ -1,7 +1,7 @@
 from asyncio import sleep as asleep, gather
 from datetime import datetime
-from pyrogram.filters import command, private, user
-from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
+from pyrogram.filters import command, private, user, regex
+from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup,CallbackQuery
 from pyrogram.errors import FloodWait, MessageNotModified
 
 from bot import bot, bot_loop, Var, ani_cache
@@ -138,7 +138,7 @@ async def edit_schedule(client, message):
     else:
         await sendMessage(message, "<b>ID not found!</b>")
 
-@bot.on_message(filters.command('addschedule') & filters.private & filters.user(Var.ADMINS))
+@bot.on_message(command('addschedule') & private & user(Var.ADMINS))
 @new_task
 async def add_schedule(client, message):
     if len(args := message.text.split(maxsplit=1)) <= 1:
@@ -188,7 +188,7 @@ async def add_schedule(client, message):
     }
 
 # ============ CALLBACK HANDLER FOR PICKER ============
-@bot.on_callback_query(filters.regex(r'^ani_'))
+@bot.on_callback_query(regex(r'^ani_'))
 @new_task
 async def handle_anilist_pick(client: CallbackQuery):
     data = client.data
