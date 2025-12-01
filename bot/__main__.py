@@ -8,7 +8,6 @@ from signal import SIGKILL
 from bot import bot, Var, bot_loop, LOGS, ffQueue, ffLock, ffpids_cache, ff_queued, sch
 from bot.core.func_utils import clean_up, new_task, editMessage
 from bot.modules.up_posts import upcoming_animes
-from app import web_server
 
 
 @bot.on_message(command('restart') & user(Var.ADMINS))
@@ -65,7 +64,6 @@ async def main():
     LOGS.info('Auto Anime Bot Started! Running in SCHEDULE mode.')
     bot_loop.create_task(queue_loop())
     await idle()
-    bot_loop.create_task(web_server())
     LOGS.info('Auto Anime Bot Stopped!')
     await bot.stop()
     sch.shutdown()
