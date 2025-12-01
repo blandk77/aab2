@@ -142,51 +142,68 @@ async def edit_schedule(client, message):
 @new_task
 async def add_schedule(client, message):
     if len(args := message.text.split(maxsplit=1)) <= 1:
-        return await sendMessage(message, "<b>Usage:</b> /addschedule rss1,rss2|platform|audio|custom_title\n<i>Example: https://nyaa.si/rss?q=Blue+Lock|CR|Dual|Blue Lock S2</i>")
+        return await sendMessage(message, 
+            "<b>Usage:</b> /addschedule rss1,rss2|platform|audio|rename_title|anilist_search_title\n"
+            "<i>Example: https://nyaa.si/?page=rss&q=Blue+Lock|CR|Dual|Blue Lock S2|Sawaranaide Kotesashi-kun</i>\n"
+            "<i>Use 'None' for optional fields. If no anilist_search_title, auto-parses RSS.</i>")
 
-    parts = args[1].split('|', 3)
+    parts = args[1].split('|', 4)  # Up to 5 parts now
     rss_raw = parts[0].strip()
     platform = parts[1].strip() if len(parts) > 1 and parts[1].lower() != 'none' else None
     audio_pref = parts[2].strip() if len(parts) > 2 and parts[2].lower() != 'none' else None
-    custom_title = parts[3].strip() if len(parts) > 3 and parts[3].lower() != 'none' else None
+    rename_title = parts[3].strip() if len(parts) > 3 and parts[3].lower() != 'none' else None
+    anilist_search = parts[4].strip() if len(parts) > 4 and parts[4].lower() != 'none' else None
 
     rss_links = [link.strip() for link in rss_raw.split(',') if link.strip()]
     if not rss_links:
         return await sendMessage(message, "<b>No valid RSS links!</b>")
 
-    # Derive search query from custom_title or RSS
-    search_query = custom_title or (await getfeed(rss_links[0])).title.split(' - ')[0].split(' [')[0].strip()
+    # Determine search query
+    if anilist_search:
+        search_query = anilist_search
+    else:
+        # Auto-parse RSS title cleanly
+        feed = await getfeed(rss_links[0])
+        if not feed:
+            return await sendMessage(message, "<b>First RSS invalid!</b>")
+        search_query = clean_rss_title(feed.title) or rename_title or "Unknown Anime"
+    
+    # Log the query for debugging
+    await rep.report(f"AniList search query: '{search_query}' for RSS: {rss_raw[:50]}...", "info")
 
-    # Search AniList for multiple results
+    # Search AniList
     results = await search_anilist_multiple(search_query)
     if not results:
-        return await sendMessage(message, f"<b>No AniList results for '{search_query}'</b>\n<i>Try exact title like 'Blue Lock Season 2'</i>")
+        await rep.report(f"AniList empty for '{search_query}'", "warning")  # Now logs!
+        return await sendMessage(message, 
+            f"<b>No AniList results for '{search_query}'</b>\n"
+            f"<i>Try providing exact anilist_search_title like 'Sawaranaide Kotesashi-kun'</i>")
 
-    # Build inline keyboard
+    # Build buttons
     buttons = []
-    for idx, res in enumerate(results[:5]):  # Top 5 only
-        title = res['title']['english'] or res['title']['romaji']
+    for res in results[:5]:
+        title = res.get('title', {}).get('english') or res.get('title', {}).get('romaji') or "Unknown"
         year = res.get('seasonYear', 'N/A')
         status = res.get('status', 'Unknown')
         next_ep = res.get('nextAiringEpisode', {}).get('episode', 'N/A')
         btn_text = f"{title} ({year}) – {status}"
         if next_ep != 'N/A':
             btn_text += f" | Ep {next_ep}"
-        buttons.append([InlineKeyboardButton(btn_text[:60], callback_data=f"ani_{res['id']}")])  # Short callback: ani_ID
+        buttons.append([InlineKeyboardButton(btn_text[:60], callback_data=f"ani_{res['id']}")])
 
     markup = InlineKeyboardMarkup(buttons)
-    msg = await sendMessage(message, f"<b>Found {len(results)} results for '{search_query}':</b>\n\n<i>Click the correct anime to schedule with your RSS ({len(rss_links)} links) + {platform or 'Any'} + {audio_pref or 'Any'}</i>", markup)
+    picker_text = f"<b>Found {len(results)} results for '{search_query}':</b>\n\n<i>Click to schedule with RSS ({len(rss_links)}) + {platform or 'Any'} + {audio_pref or 'Any'} + Rename: {rename_title or 'Auto'}</i>"
+    msg = await sendMessage(message, picker_text, markup)
 
-    # Store temp data (message_id + params) in a global dict or DB — here using global for simplicity
-    from bot import temp_schedule_data
+    # Store temp data
     temp_schedule_data[msg.id] = {
         'rss_links': rss_links,
         'platform': platform,
         'audio_pref': audio_pref,
-        'custom_title': custom_title,
+        'rename_title': rename_title,  # For filename
         'search_query': search_query
-    }
-
+}
+    
 # ============ CALLBACK HANDLER FOR PICKER ============
 @bot.on_callback_query(regex(r'^ani_'))
 @new_task
