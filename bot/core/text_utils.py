@@ -5,6 +5,7 @@ from asyncio import sleep as asleep
 from aiohttp import ClientSession
 from anitopy import parse
 import re
+import json  # For error parsing
 
 from bot import Var, bot
 from .ffencoder import ffargs
@@ -84,16 +85,28 @@ class AniLister:
     async def post_data(self):
         async with ClientSession() as sess:
             async with sess.post(self.__api, json={'query': ANIME_GRAPHQL_QUERY, 'variables': self.__vars}) as resp:
-                json_data = await resp.json() if resp.status == 200 else None
+                try:
+                    json_data = await resp.json()
+                except Exception as e:
+                    await rep.report(f"JSON parse error: {str(e)}", "warning", log=False)
+                    json_data = None
+                if resp.status != 200:
+                    await rep.report(f"AniList HTTP {resp.status}: {json_data.get('errors', [{}])[0].get('message', 'Unknown') if json_data else 'No body'}", "warning", log=False)
                 return (resp.status, json_data)
 
     async def get_anidata(self):
-        # Primary query with year
-        self.__vars = {'search': self.__ani_name, 'seasonYear': self.__original_year, 'perPage': 5}
-        await rep.report(f"Trying AniList query: '{self.__ani_name}' (year {self.__original_year})", "info", log=False)
+        # FIXED: Detect if query has year string → set seasonYear to null (avoids 400)
+        has_year_in_query = re.search(r'\b(20\d{2})\b', self.__ani_name)
+        season_var = None if has_year_in_query else self.__original_year  # null for GraphQL (no key = null)
+
+        # Primary query (no-year if year in query)
+        self.__vars = {'search': self.__ani_name, 'perPage': 5}
+        if season_var:
+            self.__vars['seasonYear'] = season_var
+        await rep.report(f"Trying AniList query: '{self.__ani_name}' (seasonYear: {season_var or 'null'})", "info", log=False)
         status, data = await self.post_data()
 
-        # FIXED: Guard against None data
+        # FIXED: Guard against None/bad data
         if data is None or not isinstance(data, dict):
             await rep.report(f"Bad API response for '{self.__ani_name}': status {status}, data {data}", "warning", log=False)
             media_list = []
@@ -104,24 +117,26 @@ class AniLister:
             await rep.report(f"Found {len(media_list)} results for '{self.__ani_name}'", "info", log=False)
             return media_list
 
-        # Fallback 1: Older years
-        while status == 404 and self.__current_year > self.__original_year - 5:
-            self.__update_vars()
-            await asleep(1)
-            await rep.report(f"404 → retrying '{self.__ani_name}' with year {self.__current_year}", "warning", log=False)
-            status, data = await self.post_data()
-            if data is None or not isinstance(data, dict):
-                await rep.report(f"Bad fallback response: status {status}", "warning", log=False)
-                media_list = []
-            else:
-                media_list = data.get('data', {}).get('Page', {}).get('media', [])
-            if media_list:
-                await rep.report(f"Found {len(media_list)} in fallback year {self.__current_year}", "info", log=False)
-                return media_list
+        # Fallback 1: Older years (skip if year in query)
+        if season_var:  # Only if we set a year initially
+            while status == 404 and self.__current_year > self.__original_year - 5:
+                self.__update_vars()
+                await asleep(1)
+                await rep.report(f"404 → retrying '{self.__ani_name}' with year {self.__current_year}", "warning", log=False)
+                self.__vars['seasonYear'] = self.__current_year
+                status, data = await self.post_data()
+                if data is None or not isinstance(data, dict):
+                    await rep.report(f"Bad fallback response: status {status}", "warning", log=False)
+                    media_list = []
+                else:
+                    media_list = data.get('data', {}).get('Page', {}).get('media', [])
+                if media_list:
+                    await rep.report(f"Found {len(media_list)} in fallback year {self.__current_year}", "info", log=False)
+                    return media_list
 
-        # Fallback 2: No year, original query
+        # Fallback 2: No year, original query (always try)
         self.__vars = {'search': self.__ani_name, 'perPage': 5}
-        await rep.report(f"Year fallback failed → no-year search for '{self.__ani_name}'", "warning", log=False)
+        await rep.report(f"Primary failed → no-year search for '{self.__ani_name}'", "warning", log=False)
         status, data = await self.post_data()
         if data is None or not isinstance(data, dict):
             await rep.report(f"Bad no-year response: status {status}", "warning", log=False)
@@ -132,8 +147,8 @@ class AniLister:
             await rep.report(f"No-year search success: {len(media_list)} results", "info", log=False)
             return media_list
 
-        # Fallback 3: Normalized romaji (remove hyphens/spaces)
-        normalized = re.sub(r'([a-zA-Z])-([a-zA-Z])', r'\1\2', self.__ani_name)  # Kotesashi-kun → Kotesashikun
+        # Fallback 3: Normalized romaji
+        normalized = re.sub(r'([a-zA-Z])-([a-zA-Z])', r'\1\2', self.__ani_name)
         if normalized != self.__ani_name:
             self.__vars = {'search': normalized, 'perPage': 5}
             await rep.report(f"Trying normalized: '{normalized}'", "warning", log=False)
@@ -163,7 +178,7 @@ async def search_anilist_multiple(query: str, max_results: int = 5):
     media_list = await anilister.get_anidata()
     return media_list[:max_results]
 
-
+# ... (keep TextEditor class unchanged from previous)
 
 class TextEditor:
     def __init__(self, name):
