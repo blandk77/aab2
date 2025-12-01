@@ -192,7 +192,7 @@ async def add_schedule(client, message):
         buttons.append([InlineKeyboardButton(btn_text[:60], callback_data=f"ani_{res['id']}")])
 
     markup = InlineKeyboardMarkup(buttons)
-    picker_text = f"<b>Found {len(results)} results for '{search_query}':</b>\n\n<i>Click to schedule with RSS ({len(rss_links)}) + {platform or 'Any'} + {audio_pref or 'Any'} + Rename: {rename_title or 'Auto'}</i>"
+    picker_text = f"<b>Found {len(results)} results for '{search_query}':</b>\n\n<i>Click to schedule. Logs: {len(results)} hits.</i>"
     msg = await sendMessage(message, picker_text, markup)
 
     # Store temp data
