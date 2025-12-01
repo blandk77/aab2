@@ -42,10 +42,21 @@ def clean_rss_title(raw_title: str) -> str:
     return raw_title
 
 class AniLister:
-    def __init__(self, query: str):
-        self.query = query.strip()
+    def __init__(self, name: str):
+        self.name = name
         self.api = "https://graphql.anilist.co"
 
+    async def get_anidata(self):
+        async with ClientSession() as session:
+            async with session.post(self.api, json={
+                "query": ANIME_GRAPHQL_QUERY,
+                "variables": {"search": self.name, "perPage": 5}
+            }) as resp:
+                if resp.status != 200:
+                    return []
+                data = await resp.json()
+                return data.get("data", {}).get("Page", {}).get("media", [])
+                                    
     async def _post(self, variables: dict):
         async with ClientSession() as session:
             async with session.post(self.api, json={'query': ANIME_GRAPHQL_QUERY, 'variables': variables}) as resp:
@@ -102,10 +113,23 @@ class AniLister:
         return {}
 
 async def search_anilist_multiple(query: str):
-    """Returns list of anime dicts"""
-    searcher = AniLister(query)
-    return await searcher.search()
-      
+    # Clean the query exactly like your old working /addtask did
+    clean = re.sub(r"\[.*?\]|\(.*?\)", "", query)
+    clean = clean.split(" - ")[0].split(" [")[0].strip()
+    
+    await rep.report(f"AniList searching: '{clean}'", "info")
+    
+    searcher = AniLister(clean)
+    results = await searcher.get_anidata()
+    
+    if not results:
+        await rep.report(f"AniList: No results for '{clean}'", "warning")
+    else:
+        await rep.report(f"AniList: Found {len(results)} results", "info")
+    
+    return results[:5]
+
+
 class TextEditor:      
     def __init__(self, name):      
         self.__name = name      
