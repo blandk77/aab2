@@ -1,200 +1,158 @@
-from calendar import month_name      
-from datetime import datetime      
-from random import choice      
-from asyncio import sleep as asleep      
-from aiohttp import ClientSession      
-from anitopy import parse      
-import re      
-import json  # For error parsing      
-      
-from bot import Var, bot      
-from .ffencoder import ffargs      
-from .func_utils import handle_logs      
-from .reporter import rep      
-      
-GENRES_EMOJI = {"Action": "👊", "Adventure": choice(['🪂', '🧗‍♀']), "Comedy": "🤣", "Drama": " 🎭", "Ecchi": choice(['💋', '🥵']), "Fantasy": choice(['🧞', '🧞‍♂', '🧞‍♀','🌗']), "Hentai": "🔞", "Horror": "☠", "Mahou Shoujo": "☯", "Mecha": "🤖", "Music": "🎸", "Mystery": "🔮", "Psychological": "♟", "Romance": "💞", "Sci-Fi": "🛸", "Slice of Life": choice(['☘','🍁']), "Sports": "⚽️", "Supernatural": "🫧", "Thriller": choice(['🥶', '🔪','🤯'])}      
+from calendar import month_name
+from datetime import datetime
+from random import choice
+from asyncio import sleep as asleep
+from aiohttp import ClientSession
+from anitopy import parse
+import re
+from anilist import Client as AniClient
+from anilist.types import Anime
 
-# ====================== ANILIST GRAPHQL ======================
-ANIME_GRAPHQL_QUERY = """
-query ($id: Int, $search: String, $seasonYear: Int, $perPage: Int) {
-  Page(perPage: $perPage) {
-    media(search: $search, type: ANIME, seasonYear: $seasonYear, sort: [SEARCH_MATCH, POPULARITY_DESC]) {
-      id
-      title { romaji english native }
-      status(version: 2)
-      seasonYear
-      nextAiringEpisode { airingAt episode }
-      coverImage { large }
-      siteUrl
-    }
-  }
-}
-"""
+_anilist_client = None
 
-def clean_rss_title(raw_title: str) -> str:
-    for tag in ["[ToonsHub]", "[VARYG]", "[Erai-raws]", "[SubsPlease]", "[Judas]", "[EMBER]", "[Bili]", "(Multi-Subs)"]:
-        raw_title = raw_title.replace(tag, "").strip()
-    raw_title = re.sub(r'S\d+E\d+|Ep\.?\s*\d+|1080p|720p|480p|360p|WEB.?DL|AAC\d\.\d|H\.265|H\.264|\d+p|BILI|WEB|DL', '', raw_title, flags=re.IGNORECASE)
-    raw_title = re.sub(r'[-–] .*', '', raw_title)
-    raw_title = re.sub(r'\s*\(.*\)', '', raw_title)
-    raw_title = re.sub(r'[!\?\.]+$', '', raw_title).strip()
-    raw_title = re.sub(r'([a-zA-Z])-([a-zA-Z])', r'\1\2', raw_title)
-    return raw_title
+async def get_anilist_client():
+    global _anilist_client
+    if _anilist_client is None:
+        _anilist_client = AniClient()
+    return _anilist_client
 
-class AniLister:
-    def __init__(self, name: str):
-        self.name = name
-        self.api = "https://graphql.anilist.co"
-
-    async def get_anidata(self):
-        async with ClientSession() as session:
-            async with session.post(self.api, json={
-                "query": ANIME_GRAPHQL_QUERY,
-                "variables": {"search": self.name, "perPage": 5}
-            }) as resp:
-                if resp.status != 200:
-                    return []
-                data = await resp.json()
-                return data.get("data", {}).get("Page", {}).get("media", [])
-                                    
-    async def _post(self, variables: dict):
-        async with ClientSession() as session:
-            async with session.post(self.api, json={'query': ANIME_GRAPHQL_QUERY, 'variables': variables}) as resp:
-                try:
-                    data = await resp.json()
-                except:
-                    data = None
-                return resp.status, data
-
-    async def search(self):
-        # Main search — never send seasonYear if query contains a year number
-        variables = {"search": self.query, "perPage": 5}
-        if not re.search(r'\b20\d{2}\b', self.query):
-            variables["seasonYear"] = datetime.now().year
-
-        status, data = await self._post(variables)
-        await rep.report(f"AniList → Query: '{self.query}' | Status: {status}", "info", log=False)
-
-        # SAFE parsing
-        if not data or not isinstance(data, dict):
-            await rep.report(f"AniList returned bad data: {data}", "warning", log=False)
-            media = []
-        else:
-            media = data.get("data", {}).get("Page", {}).get("media", [])
-
-        if media:
-            await rep.report(f"Found {len(media)} results", "info", log=False)
-            return media
-
-        # Fallback: force no year
-        await rep.report("Primary failed → trying without year", "warning", log=False)
-        status, data = await self._post({"search": self.query, "perPage": 5})
-        if data and isinstance(data, dict):
-            media = data.get("data", {}).get("Page", {}).get("media", [])
-            if media:
-                return media
-
-        # Final fallback: normalized name
-        norm = re.sub(r'([a-zA-Z])-([a-zA-Z])', r'\1\2', self.query)
-        if norm != self.query:
-            status, data = await self._post({"search": norm, "perPage": 5})
-            if data and isinstance(data, dict):
-                media = data.get("data", {}).get("Page", {}).get("media", [])
-                if media:
-                    return media
-
-        await rep.report(f"AniList: ZERO results for '{self.query}'", "error", log=False)
+async def search_anilist_multiple(query: str, max_results: int = 5):
+    """Used ONLY for /addschedule picker — 100% reliable"""
+    client = await get_anilist_client()
+    
+    try:
+        results: list[Anime] = await client.search_anime(query, limit=max_results)
+    except Exception as e:
+        from bot.core.reporter import rep
+        await rep.report(f"AniList.py error: {e}", "warning")
         return []
 
-    async def by_id(self, ani_id: int):
-        status, data = await self._post({"id": ani_id, "perPage": 1})
-        if data and isinstance(data, dict):
-            return data.get("data", {}).get("Page", {}).get("media", [{}])[0] or {}
-        return {}
-
-async def search_anilist_multiple(query: str):
-    # Clean the query exactly like your old working /addtask did
-    clean = re.sub(r"\[.*?\]|\(.*?\)", "", query)
-    clean = clean.split(" - ")[0].split(" [")[0].strip()
-    
-    await rep.report(f"AniList searching: '{clean}'", "info")
-    
-    searcher = AniLister(clean)
-    results = await searcher.get_anidata()
-    
     if not results:
-        await rep.report(f"AniList: No results for '{clean}'", "warning")
-    else:
-        await rep.report(f"AniList: Found {len(results)} results", "info")
-    
-    return results[:5]
+        from bot.core.reporter import rep
+        await rep.report(f"AniList.py: No results for '{query}'", "warning")
+        return []
 
+    formatted = []
+    for anime in results:
+        formatted.append({
+            "id": anime.id,
+            "title": {
+                "english": anime.title_english or anime.title_romaji,
+                "romaji": anime.title_romaji,
+                "native": anime.title_native
+            },
+            "status": (anime.status.value.upper() if anime.status else "UNKNOWN"),
+            "seasonYear": anime.start_date.year if anime.start_date else None,
+            "nextAiringEpisode": {
+                "episode": anime.next_episode,
+                "airingAt": int(anime.next_airing_time.timestamp()) if anime.next_airing_time else None
+            } if anime.next_episode else None,
+            "coverImage": {"large": anime.cover_image or "https://via.placeholder.com/300x450"}
+        })
 
-class TextEditor:      
-    def __init__(self, name):      
-        self.__name = name      
-        self.adata = {}      
-        self.pdata = parse(name)      
-      
-    async def load_anilist(self):      
-        cache_names = []      
-        for option in [(False, False), (False, True), (True, False), (True, True)]:      
-            ani_name = await self.parse_name(*option)      
-            if ani_name in cache_names:      
-                continue      
-            cache_names.append(ani_name)      
-            self.adata = await AniLister(ani_name).get_anidata()      
-            if self.adata:      
-                break      
-      
-    @handle_logs      
-    async def parse_name(self, no_s=False, no_y=False):      
-        anime_name = self.pdata.get("anime_title")      
-        anime_season = self.pdata.get("anime_season")      
-        anime_year = self.pdata.get("anime_year")      
-        if anime_name:      
-            pname = anime_name      
-            if not no_s and self.pdata.get("episode_number") and anime_season:      
-                pname += f" {anime_season}"      
-            if not no_y and anime_year:      
-                pname += f" {anime_year}"      
-            return pname      
-        return anime_name      
-              
-    @handle_logs      
-    async def get_poster(self):      
-        if anime_id := self.adata.get('id'):      
-            return f"https://img.anili.st/media/{anime_id}"      
-        return "https://files.catbox.moe/z69m7i.jpg"      
-              
-    @handle_logs      
-    async def get_upname(self, qual="", custom_title=None, audio_type="Sub"):      
-        anime_name = self.pdata.get("anime_title")      
-        anime_season = str(ani_s[-1]) if (ani_s := self.pdata.get('anime_season', '01')) and isinstance(ani_s, list) else str(ani_s)      
-        if anime_name and self.pdata.get("episode_number"):      
-            titles = self.adata.get('title', {})      
-            title_use = custom_title or (titles.get('english') or titles.get('romaji') or titles.get('native'))      
-            return f"""[S{anime_season}-E{self.pdata.get('episode_number')}] {title_use} [{qual}p] [{audio_type}] {Var.BRAND_UNAME}.mkv"""      
-      
-    @handle_logs      
-    async def get_caption(self, audio_lang="Japanese", sub_type="English"):      
-        sd = self.adata.get('startDate', {})      
-        startdate = f"{month_name[sd['month']]} {sd['day']}, {sd['year']}" if sd.get('day') and sd.get('year') else ""      
-        ed = self.adata.get('endDate', {})      
-        enddate = f"{month_name[ed['month']]} {ed['day']}, {ed['year']}" if ed.get('day') and ed.get('year') else ""      
-        titles = self.adata.get("title", {})      
-        desc = self.adata.get("description") or "N/A"      
-        plot = desc[:200] + "..." if len(desc) > 200 else desc      
-              
-        return f"""      
- <code>{titles.get('english') or titles.get('romaji') or titles.get('native')}</code>      
-<b>◇──◇──◇──◇──◇──◇──◇──◇</b>      
-<b>✦</b> <i>Genres:</i> <code>{', '.join(self.adata.get('genres', []))}</code>      
-<b>✦</b> <i>Episode:</i> <code>{self.pdata.get("episode_number")}</code>      
-<b>✦</b> <i>Audio:</i> <code>{audio_lang}</code>      
-<b>✦</b> <i>Subtitle:</i> <code>{sub_type}</code>      
-<b>◇──◇──◇──◇──◇──◇──◇──◇</b>      
-<blockquote><b>Description:</b> {plot}</blockquote>      
-<blockquote><b>╭╌═╌═╌═╌══╌═╌═╌═╌═╌╮</b>          <b>✦</b> <b><i>Powered By ~</i></b> <i>{Var.BRAND_UNAME}</i>      
-<b>╰╌═╌═╌═╌═╌═╌═╌═╌══╌╯</b></blockquote>      
+    from bot.core.reporter import rep
+    await rep.report(f"AniList.py: Found {len(results)} results for '{query}'", "info")
+    return formatted
+
+class AniLister:
+    def __init__(self, anime_name: str, year: int = None) -> None:
+        self.__api = "https://graphql.anilist.co"
+        self.__ani_name = anime_name.strip()
+        self.__original_year = year or datetime.now().year
+
+    async def post_data(self):
+        query = """
+        query ($search: String, $perPage: Int) {
+          Page(perPage: $perPage) {
+            media(search: $search, type: ANIME) {
+              id
+              title { romaji english native }
+              description(asHtml: false)
+              status(version: 2)
+              seasonYear
+              episodes
+              nextAiringEpisode { airingAt episode }
+              coverImage { large }
+              genres
+              averageScore
+              studios { nodes { name } }
+              startDate { year month day }
+            }
+          }
+        }
+        """
+        async with ClientSession() as sess:
+            async with sess.post(self.__api, json={
+                "query": query,
+                "variables": {"search": self.__ani_name, "perPage": 1}
+            }) as resp:
+                if resp.status != 200:
+                    return {}
+                data = await resp.json()
+                return data.get("data", {}).get("Page", {}).get("media", [{}])[0] or {}
+
+    async def get_anidata(self):
+        return await self.post_data()
+
+class TextEditor:
+    def __init__(self, name):
+        self.__name = name
+        self.adata = {}
+        self.pdata = parse(name)
+
+    async def load_anilist(self):
+        cache_names = []
+        for option in [(False, False), (False, True), (True, False), (True, True)]:
+            ani_name = await self.parse_name(*option)
+            if ani_name in cache_names or not ani_name:
+                continue
+            cache_names.append(ani_name)
+            self.adata = await AniLister(ani_name).get_anidata()
+            if self.adata:
+                break
+
+    async def parse_name(self, no_s=False, no_y=False):
+        anime_name = self.pdata.get("anime_title")
+        if not anime_name:
+            return ""
+        pname = anime_name
+        if not no_s and self.pdata.get("episode_number") and self.pdata.get("anime_season"):
+            pname += f" Season {self.pdata.get('anime_season')}"
+        if not no_y and self.pdata.get("anime_year"):
+            pname += f" {self.pdata.get('anime_year')}"
+        return pname
+
+    async def get_poster(self):
+        if anime_id := self.adata.get('id'):
+            return f"https://img.anili.st/media/{anime_id}"
+        return "https://files.catbox.moe/z69m7i.jpg"
+
+    async def get_upname(self, qual="", custom_title=None, audio_type="Sub"):
+        if not self.pdata.get("anime_title") or not self.pdata.get("episode_number"):
+            return None
+        title_use = custom_title or (
+            self.adata.get("title", {}).get("english") or
+            self.adata.get("title", {}).get("romaji") or
+            self.adata.get("title", {}).get("native")
+        )
+        season = self.pdata.get("anime_season", "01")
+        if isinstance(season, list):
+            season = season[-1]
+        return f"[S{season}-E{self.pdata.get('episode_number')}] {title_use} [{qual}p] [{audio_type}] @{Var.BRAND_UNAME}.mkv"
+
+    async def get_caption(self, audio_lang="Japanese", sub_type="English"):
+        if not self.adata:
+            return "<code>No AniList data</code>"
+        titles = self.adata.get("title", {})
+        title = titles.get("english") or titles.get("romaji") or titles.get("native")
+        desc = (self.adata.get("description") or "No description").replace("<br>", "\n")
+        plot = desc[:200] + "..." if len(desc) > 200 else desc
+        genres = ", ".join(self.adata.get("genres", []))
+        ep = self.pdata.get("episode_number", "??")
+        return f"""
+<code>{title}</code>
+<b>◇ Episode:</b> <code>{ep}</code> │ <b>Audio:</b> <code>{audio_lang}</code> │ <b>Subs:</b> <code>{sub_type}</code>
+<b>◇ Genres:</b> <code>{genres or "N/A"}</code>
+<blockquote>{plot}</blockquote>
+<i>Powered by @{Var.BRAND_UNAME}</i>
 """.strip()
