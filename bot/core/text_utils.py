@@ -16,7 +16,7 @@ GENRES_EMOJI = {"Action": "👊", "Adventure": choice(['🪂', '🧗‍♀']), "
 ANIME_GRAPHQL_QUERY = """
 query ($id: Int, $search: String, $seasonYear: Int, $perPage: Int) {
   Page(perPage: $perPage) {
-    media(search: $search, type: ANIME, seasonYear: $seasonYear, sort: [TRENDING_DESC, POPULARITY_DESC]) {
+    media(search: $search, type: ANIME, seasonYear: $seasonYear, sort: [SEARCH_MATCH, POPULARITY_DESC]) {
       id
       title {
         romaji
@@ -61,11 +61,13 @@ def clean_rss_title(raw_title: str) -> str:
     for tag in ["[ToonsHub]", "[VARYG]", "[Erai-raws]", "[SubsPlease]", "[Judas]", "[EMBER]", "[Bili]", "(Multi-Subs)"]:
         raw_title = raw_title.replace(tag, "").strip()
     
-    # Remove episode/quality patterns
-    raw_title = re.sub(r'S\d+E\d+|Ep\.?\s*\d+|1080p|720p|480p|360p|WEB-DL|AAC\d\.\d|H\.265|H\.264|\d+p', '', raw_title)
+    # Remove episode/quality/source patterns (enhanced)
+    raw_title = re.sub(r'S\d+E\d+|Ep\.?\s*\d+|1080p|720p|480p|360p|WEB-DL|AAC\d\.\d|H\.265|H\.264|\d+p|BILI|WEB|DL', '', raw_title, flags=re.IGNORECASE)
     raw_title = re.sub(r'[-–] .*', '', raw_title)  # Everything after " - "
     raw_title = re.sub(r'\s*\(.*\)', '', raw_title)  # Parentheticals
     raw_title = re.sub(r'[!\?\.]+$', '', raw_title)  # Trailing punctuation
+    # Normalize romaji (remove hyphens/spaces in names like "Kotesashi-kun" → "Kotesashikun")
+    raw_title = re.sub(r'([a-zA-Z])-([a-zA-Z])', r'\1\2', raw_title)  # Kotesashi-kun → Kotesashikun
     return raw_title.strip()
 
 class AniLister:
@@ -85,21 +87,48 @@ class AniLister:
                 return (resp.status, await resp.json())
 
     async def get_anidata(self):
+        # Primary query with year
         self.__vars = {'search': self.__ani_name, 'seasonYear': self.__original_year, 'perPage': 5}
+        await rep.report(f"Trying AniList query: '{self.__ani_name}' (year {self.__original_year})", "info", log=False)
         status, data = await self.post_data()
 
+        media_list = data.get('data', {}).get('Page', {}).get('media', [])
+        if media_list:
+            await rep.report(f"Found {len(media_list)} results for '{self.__ani_name}'", "info", log=False)
+            return media_list
+
+        # Fallback 1: Older years
         while status == 404 and self.__current_year > self.__original_year - 5:
             self.__update_vars()
             await asleep(1)
+            await rep.report(f"404 → retrying '{self.__ani_name}' with year {self.__current_year}", "warning", log=False)
             status, data = await self.post_data()
-
-        if status == 404:
-            self.__vars = {'search': self.__ani_name, 'perPage': 5}
-            status, data = await self.post_data()
-
-        if status == 200:
             media_list = data.get('data', {}).get('Page', {}).get('media', [])
-            return media_list if media_list else []
+            if media_list:
+                await rep.report(f"Found {len(media_list)} in fallback year {self.__current_year}", "info", log=False)
+                return media_list
+
+        # Fallback 2: No year, original query
+        self.__vars = {'search': self.__ani_name, 'perPage': 5}
+        await rep.report(f"Year fallback failed → no-year search for '{self.__ani_name}'", "warning", log=False)
+        status, data = await self.post_data()
+        media_list = data.get('data', {}).get('Page', {}).get('media', [])
+        if media_list:
+            await rep.report(f"No-year search success: {len(media_list)} results", "info", log=False)
+            return media_list
+
+        # Fallback 3: Normalized romaji (remove hyphens/spaces)
+        normalized = re.sub(r'([a-zA-Z])-([a-zA-Z])', r'\1\2', self.__ani_name)  # Kotesashi-kun → Kotesashikun
+        if normalized != self.__ani_name:
+            self.__vars = {'search': normalized, 'perPage': 5}
+            await rep.report(f"Trying normalized: '{normalized}'", "warning", log=False)
+            status, data = await self.post_data()
+            media_list = data.get('data', {}).get('Page', {}).get('media', [])
+            if media_list:
+                await rep.report(f"Normalized success: {len(media_list)} results", "info", log=False)
+                return media_list
+
+        await rep.report(f"Total failure for '{self.__ani_name}' → 0 results after all fallbacks", "error", log=False)
         return []
 
     async def get_anidata_by_id(self):
@@ -115,6 +144,7 @@ async def search_anilist_multiple(query: str, max_results: int = 5):
     media_list = await anilister.get_anidata()
     return media_list[:max_results]
 
+# ... (keep TextEditor class unchanged from previous version)
 class TextEditor:
     def __init__(self, name):
         self.__name = name
