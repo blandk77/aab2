@@ -1,4 +1,4 @@
-#modify addtask
+#fixed indent 
 from asyncio import sleep as asleep, gather    
 from datetime import datetime, timedelta, timezone
 from pyrogram.filters import command, private, user, regex    
@@ -283,7 +283,7 @@ async def handle_anilist_pick(client, query):
         f"<i>Next episode will be uploaded automatically.</i>"
     )
     await query.message.reply_photo(photo=poster_url, caption=caption)
-q
+
     temp_schedule_data.pop(query.message.id, None)
     await query.answer("Scheduled successfully!", show_alert=False)
 
