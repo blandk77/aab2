@@ -1,3 +1,4 @@
+#Fix
 from asyncio import sleep as asleep, gather    
 from datetime import datetime    
 from pyrogram.filters import command, private, user, regex    
@@ -139,9 +140,6 @@ async def edit_schedule(client, message):
         await sendMessage(message, "<b>ID not found!</b>")    
     
 
-# ─────────────────────────────────────────────────────────────
-# /addschedule COMMAND
-# ─────────────────────────────────────────────────────────────
 @bot.on_message(command('addschedule') & private & user(Var.ADMINS))
 @new_task
 async def add_schedule(client, message):
@@ -215,10 +213,7 @@ async def add_schedule(client, message):
     }
 
 
-# ─────────────────────────────────────────────────────────────
-# CALLBACK HANDLER — FIXED & WORKING
-# ─────────────────────────────────────────────────────────────
-@bot.on_callback_query(filters.regex(r'^ani_'))
+@bot.on_callback_query(regex(r'^ani_'))
 @new_task
 async def handle_anilist_pick(client, query):
     ani_id = int(query.data.split('_')[1])
