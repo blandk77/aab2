@@ -1,11 +1,11 @@
-#Fix
+#Fix sch 
 from asyncio import sleep as asleep, gather    
 from datetime import datetime    
 from pyrogram.filters import command, private, user, regex    
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup,CallbackQuery    
 from pyrogram.errors import FloodWait, MessageNotModified    
     
-from bot import bot, bot_loop, Var, ani_cache    
+from bot import bot, bot_loop, Var, ani_cache, sch  
 from bot.core.database import db    
 from bot.core.func_utils import decode, is_fsubbed, get_fsubs, editMessage, sendMessage, new_task, convertTime, getfeed    
 from bot.core.auto_animes import process_scheduled_anime    
