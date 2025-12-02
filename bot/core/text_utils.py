@@ -6,6 +6,7 @@ from asyncio import sleep as asleep
 from aiohttp import ClientSession
 from anitopy import parse
 import re
+from bot import Var
 from AnilistPython import Anilist
 from bot.core.reporter import rep
 
