@@ -279,8 +279,15 @@ class TextEditor:
         anime_season = str(ani_s[-1]) if (ani_s := self.pdata.get('anime_season', '01')) and isinstance(ani_s, list) else str(ani_s)
         if anime_name and self.pdata.get("episode_number"):
             titles = self.adata.get('title', {})
-            title_use = custom_title or (titles.get('english') or titles.get('romaji') or titles.get('native'))
-            return f"""[S{anime_season}-E{self.pdata.get('episode_number')}] {title_use} [{qual}p] [{audio_type}] {Var.BRAND_UNAME}.mkv"""
+            # FIXED: Always use custom_title if provided, else AniList/parsed
+            title_use = custom_title or (
+                titles.get('english') or 
+                titles.get('romaji') or 
+                titles.get('native') or 
+                anime_name
+            )
+            return f"[S{anime_season}-E{self.pdata.get('episode_number')}] {title_use} [{qual}p] [{audio_type}] {Var.BRAND_UNAME}.mkv"
+        return None
 
     
     async def get_caption(self, audio_lang="Japanese", sub_type="English"):
