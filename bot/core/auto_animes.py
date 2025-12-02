@@ -157,9 +157,8 @@ async def get_animes(name, torrent, force=False, sch_data=None, dl_path=None, au
             post_msg = await bot.send_photo(
                 Var.MAIN_CHANNEL,
                 photo=await aniInfo.get_poster(),
-                caption=await aniInfo.get_caption()
+                caption=await aniInfo.get_caption(audio_lang=audio_lang, sub_type=sub_type)
             )
-            #post_msg = await sendMessage(Var.MAIN_CHANNEL, (await aniInfo.get_caption()).format(await aniInfo.get_poster()), invert_media=True)
             
             await asleep(1.5)
             stat_msg = await sendMessage(Var.MAIN_CHANNEL, f"‣ <b>Anime Name :</b> <b><i>{name}</i></b>\n\n<i>Downloading...</i>")
@@ -181,7 +180,9 @@ async def get_animes(name, torrent, force=False, sch_data=None, dl_path=None, au
             await ffLock.acquire()
             btns = []
             for qual in Var.QUALS:
-                filename = await aniInfo.get_upname(qual)
+                # FIXED: Pass custom_title from sch_data if available
+                custom_title = sch_data['custom_title'] if sch_data and sch_data.get('custom_title') else None
+                filename = await aniInfo.get_upname(qual, custom_title=custom_title, audio_type=audio_type)
                 await editMessage(stat_msg, f"‣ <b>Anime Name :</b> <b><i>{name}</i></b>\n\n<i>Ready to Encode...</i>")
                 
                 await asleep(1.5)
@@ -225,7 +226,7 @@ async def get_animes(name, torrent, force=False, sch_data=None, dl_path=None, au
         ani_cache['completed'].add(ani_id)
     except Exception as error:
         await rep.report(format_exc(), "error")
-
+        
 async def extra_utils(msg_id, out_path):
     msg = await bot.get_messages(Var.FILE_STORE, message_ids=msg_id)
 
