@@ -13,6 +13,7 @@ from .text_utils import TextEditor
 from .ffencoder import FFEncoder
 from .tguploader import TgUploader
 from .reporter import rep
+from traceback import format_exc
 
 btn_formatter = {'1080':'1080p', '720':'720p', '480':'480p', '360':'360p'}
 
