@@ -20,8 +20,6 @@ CAPTION_FORMAT = """
 <b>✦</b> <i>Subtitle:</i> <code>{sub_type}</code>
 <b>◇──◇──◇──◇──◇──◇──◇──◇</b>
 <blockquote expandable><b>Description:</b> {plot}</blockquote>
-<blockquote><b>╭╌═╌═╌═╌══╌═╌═╌═╌═╌╮</b>          <b>✦</b> <b><i>Powered By ~</i></b> <i>{cred}</i>
-<b>╰╌═╌═╌═╌═╌═╌═╌═╌══╌╯</b></blockquote>
 """
 
 
@@ -207,12 +205,11 @@ class TextEditor:
             if self.adata:
                 break
 
-    @handle_logs
     async def get_id(self):
         if (ani_id := self.adata.get('id')) and str(ani_id).isdigit():
             return ani_id
             
-    @handle_logs
+    
     async def parse_name(self, no_s=False, no_y=False):
         anime_name = self.pdata.get("anime_title")
         anime_season = self.pdata.get("anime_season")
@@ -226,13 +223,13 @@ class TextEditor:
             return pname
         return anime_name
         
-    @handle_logs
+    
     async def get_poster(self):
         if anime_id := await self.get_id():
             return f"https://img.anili.st/media/{anime_id}"
         return "https://files.catbox.moe/z69m7i.jpg"
         
-    @handle_logs
+    
     async def get_upname(self, qual="", custom_title=None, audio_type="Sub"):
         anime_name = self.pdata.get("anime_title")
         anime_season = str(ani_s[-1]) if (ani_s := self.pdata.get('anime_season', '01')) and isinstance(ani_s, list) else str(ani_s)
@@ -241,7 +238,7 @@ class TextEditor:
             title_use = custom_title or (titles.get('english') or titles.get('romaji') or titles.get('native'))
             return f"""[S{anime_season}-E{self.pdata.get('episode_number')}] {title_use} [{qual}p] [{audio_type}] {Var.BRAND_UNAME}.mkv"""
 
-    @handle_logs
+    
     async def get_caption(self, audio_lang="Japanese", sub_type="English"):
         sd = self.adata.get('startDate', {})
         startdate = f"{month_name[sd['month']]} {sd['day']}, {sd['year']}" if sd.get('day') and sd.get('year') else ""
@@ -257,6 +254,5 @@ class TextEditor:
             ep_no=self.pdata.get("episode_number"),
             audio_lang=audio_lang,
             sub_type=sub_type,
-            plot=plot,
-            cred=Var.BRAND_UNAME
+            plot=plot
         )
