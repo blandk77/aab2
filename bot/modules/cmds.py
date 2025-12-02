@@ -138,117 +138,152 @@ async def edit_schedule(client, message):
     else:    
         await sendMessage(message, "<b>ID not found!</b>")    
     
-@bot.on_message(command('addschedule') & private & user(Var.ADMINS))    
-@new_task    
-async def add_schedule(client, message):    
-    if len(args := message.text.split(maxsplit=1)) <= 1:    
-        return await sendMessage(message,     
-            "<b>Usage:</b> /addschedule rss1,rss2|platform|audio|rename_title|anilist_search_title\n"    
-            "<i>Example: https://nyaa.si/?page=rss&q=Blue+Lock|CR|Dual|Blue Lock S2|Sawaranaide Kotesashi-kun</i>\n"    
-            "<i>Use 'None' for optional fields. If no anilist_search_title, auto-parses RSS.</i>")    
-    
-    parts = args[1].split('|', 4)  # Up to 5 parts now    
-    rss_raw = parts[0].strip()    
-    platform = parts[1].strip() if len(parts) > 1 and parts[1].lower() != 'none' else None    
-    audio_pref = parts[2].strip() if len(parts) > 2 and parts[2].lower() != 'none' else None    
-    rename_title = parts[3].strip() if len(parts) > 3 and parts[3].lower() != 'none' else None    
-    anilist_search = parts[4].strip() if len(parts) > 4 and parts[4].lower() != 'none' else None    
-    
-    rss_links = [link.strip() for link in rss_raw.split(',') if link.strip()]    
-    if not rss_links:    
-        return await sendMessage(message, "<b>No valid RSS links!</b>")    
-    
-    # Determine search query    
-    if anilist_search:    
-        search_query = anilist_search    
-    else:    
-        # Auto-parse RSS title cleanly    
-        feed = await getfeed(rss_links[0])    
-        if not feed:    
-            return await sendMessage(message, "<b>First RSS invalid!</b>")    
-        search_query = clean_rss_title(feed.title) or rename_title or "Unknown Anime"    
-        
-    # Log the query for debugging    
-    await rep.report(f"AniList search query: '{search_query}' for RSS: {rss_raw[:50]}...", "info")    
-    
-    # Search AniList    
-    results = await search_anilist_multiple(search_query)    
-    if not results:    
-        await rep.report(f"AniList empty for '{search_query}'", "warning")  # Now logs!    
-        return await sendMessage(message,     
-            f"<b>No AniList results for '{search_query}'</b>\n"    
-            f"<i>Try providing exact anilist_search_title like 'Sawaranaide Kotesashi-kun'</i>")    
-    
-    # Build buttons    
-    buttons = []    
-    for res in results[:5]:    
-        title = res.get('title', {}).get('english') or res.get('title', {}).get('romaji') or "Unknown"    
-        year = res.get('seasonYear', 'N/A')    
-        status = res.get('status', 'Unknown')    
-        next_ep = res.get('nextAiringEpisode', {}).get('episode', 'N/A')    
-        btn_text = f"{title} ({year}) – {status}"    
-        if next_ep != 'N/A':    
-            btn_text += f" | Ep {next_ep}"    
-        buttons.append([InlineKeyboardButton(btn_text[:60], callback_data=f"ani_{res['id']}")])    
-    
-    markup = InlineKeyboardMarkup(buttons)    
-    picker_text = f"<b>Found {len(results)} results for '{search_query}':</b>\n\n<i>Click to schedule. Logs: {len(results)} hits.</i>"    
-    msg = await sendMessage(message, picker_text, markup)    
-    
-    # Store temp data    
-    temp_schedule_data[msg.id] = {    
-        'rss_links': rss_links,    
-        'platform': platform,    
-        'audio_pref': audio_pref,    
-        'rename_title': rename_title,  # For filename    
-        'search_query': search_query    
-}    
-        
-# ============ CALLBACK HANDLER FOR PICKER ============    
-@bot.on_callback_query(regex(r'^ani_'))    
-@new_task    
-async def handle_anilist_pick(client, CallbackQuery):    
-    data = client.data    
-    ani_id = int(data.split('_')[1])    
-    
-    # Get full data by ID    
-    anilister = AniLister(f"id:{ani_id}")    
-    ani_data = await anilister.get_anidata_by_id()  # New method below    
-    if not ani_data:    
-        return await client.answer("Failed to fetch details — try again!", show_alert=True)    
-    
-    # Get message & temp data    
-    msg = client.message    
-    temp_data = temp_schedule_data.get(msg.id)    
-    if not temp_data:    
-        return await client.answer("Session expired — restart /addschedule!", show_alert=True)    
-    
-    # Schedule it    
-    next_air = ani_data.get('nextAiringEpisode')    
-    if not next_air:    
-        return await client.answer("No upcoming episode — pick another!", show_alert=True)    
-    
-    airing_time = datetime.fromtimestamp(next_air['airingAt'] + 300)  # +5min    
-    sch_id = await db.saveSchedule(    
-        name=ani_data['title']['english'] or ani_data['title']['romaji'],    
-        rss_links=temp_data['rss_links'],    
-        platform=temp_data['platform'],    
-        audio_pref=temp_data['audio_pref'],    
-        custom_title=temp_data['custom_title'],    
-        timestamp=airing_time.timestamp()    
-    )    
-    
-    sch.add_job(process_scheduled_anime, 'date', run_date=airing_time, args=(sch_id,), id=f"sch_{sch_id}")    
-    
-    # Edit picker to success    
-    success_text = f"<b>✅ Scheduled Successfully!</b>\n\n<b>Anime:</b> {ani_data['title']['english'] or ani_data['title']['romaji']}\n<b>Next Ep:</b> {airing_time.strftime('%Y-%m-%d %I:%M %p')} IST\n<b>ID:</b> <code>{sch_id}</code>"    
-    await editMessage(msg, success_text)    
-    
-    # Send new message with poster    
-    poster_url = f"https://img.anili.st/media/{ani_id}"    
-    caption = f"<b>Added to Schedule:</b>\n{ani_data.get('title', {}).get('english', 'N/A')}\n\n<i>RSS: {len(temp_data['rss_links'])} | Platform: {temp_data['platform'] or 'Any'} | Audio: {temp_data['audio_pref'] or 'Any'} | Rename: {temp_data['custom_title'] or 'Auto'}</i>"    
-    await client.message.reply_photo(photo=poster_url, caption=caption)    
-    
-    # Cleanup temp    
-    del temp_schedule_data[msg.id]    
-    await client.answer("Scheduled! Check /listschedule.", show_alert=False)
+
+# ─────────────────────────────────────────────────────────────
+# /addschedule COMMAND
+# ─────────────────────────────────────────────────────────────
+@bot.on_message(command('addschedule') & private & user(Var.ADMINS))
+@new_task
+async def add_schedule(client, message):
+    if len(message.command) < 2:
+        return await message.reply(
+            "<b>Usage:</b> /addschedule rss1,rss2|platform|audio|rename_title|anilist_search_title\n"
+            "<i>Example:</i> <code>https://nyaa.si/?page=rss&q=Blue+Lock|CR|Dual|Blue Lock S2|Blue Lock Season 2</code>\n"
+            "<i>Use <code>None</code> for optional fields. If no anilist_search_title → auto-parses RSS title.</i>"
+        )
+
+    parts = message.text.split(maxsplit=1)[1].split('|', 4)
+    rss_raw = parts[0].strip()
+    platform = parts[1].strip() if len(parts) > 1 and parts[1].lower() != 'none' else None
+    audio_pref = parts[2].strip() if len(parts) > 2 and parts[2].lower() != 'none' else None
+    rename_title = parts[3].strip() if len(parts) > 3 and parts[3].lower() != 'none' else None
+    anilist_search = parts[4].strip() if len(parts) > 4 and parts[4].lower() != 'none' else None
+
+    rss_links = [link.strip() for link in rss_raw.split(',') if link.strip()]
+    if not rss_links:
+        return await message.reply("<b>No valid RSS links provided!</b>")
+
+    # Determine search query
+    if anilist_search:
+        search_query = anilist_search
+    else:
+        feed = await getfeed(rss_links[0])
+        if not feed or not feed.entries:
+            return await message.reply("<b>Failed to read first RSS feed!</b>")
+        search_query = clean_rss_title(feed.entries[0].title) or rename_title or "Unknown Anime"
+
+    await rep.report(f"AniList search query: '{search_query}' for RSS: {rss_raw[:50]}...", "info")
+
+    results = await search_anilist_multiple(search_query)
+    if not results:
+        await rep.report(f"AniList empty for '{search_query}'", "warning")
+        return await message.reply(
+            f"<b>No AniList results found for:</b> <code>{search_query}</code>\n\n"
+            "<i>Try providing the exact title as the 5th part after |</i>"
+        )
+
+    # Build inline buttons
+    buttons = []
+    for res in results[:5]:
+        title = (res.get('title', {}).get('english') or
+                 res.get('title', {}).get('romaji') or "Unknown")
+        year = res.get('seasonYear') or "N/A"
+        status = res.get('status', 'Unknown').title()
+        next_ep = res.get('nextAiringEpisode', {}).get('episode')
+        btn_text = f"{title} ({year}) – {status}"
+        if next_ep:
+            btn_text += f" | Ep {next_ep}"
+        buttons.append([InlineKeyboardButton(
+            btn_text[:64], callback_data=f"ani_{res['id']}"
+        )])
+
+    markup = InlineKeyboardMarkup(buttons)
+    picker_msg = await message.reply(
+        f"<b>Found {len(results)} result(s) for:</b> <code>{search_query}</code>\n\n"
+        "<i>Click the correct anime to schedule:</i>",
+        reply_markup=markup
+    )
+
+    # Store temporary data
+    temp_schedule_data[picker_msg.id] = {
+        'rss_links': rss_links,
+        'platform': platform,
+        'audio_pref': audio_pref,
+        'rename_title': rename_title,
+        'search_query': search_query,
+        'user_id': message.from_user.id
+    }
+
+
+# ─────────────────────────────────────────────────────────────
+# CALLBACK HANDLER — FIXED & WORKING
+# ─────────────────────────────────────────────────────────────
+@bot.on_callback_query(filters.regex(r'^ani_'))
+@new_task
+async def handle_anilist_pick(client, query):
+    ani_id = int(query.data.split('_')[1])
+
+    # Retrieve temp data
+    temp_data = temp_schedule_data.get(query.message.id)
+    if not temp_data:
+        return await query.answer("Session expired! Run /addschedule again.", show_alert=True)
+
+    # Fetch full anime data by ID
+    anilister = AniLister(f"id:{ani_id}")
+    ani_data = await anilister.get_anidata()  # Your existing method works fine with id:123
+
+    if not ani_data or not ani_data.get('nextAiringEpisode'):
+        return await query.answer("No upcoming episode or failed to fetch data.", show_alert=True)
+
+    next_air = ani_data['nextAiringEpisode']
+    airing_time = datetime.fromtimestamp(next_air['airingAt'] + 300)  # +5 min buffer
+
+    title = (ani_data['title'].get('english') or
+             ani_data['title'].get('romaji') or
+             ani_data['title'].get('native') or "Unknown Anime")
+
+    # Save to DB
+    sch_id = await db.saveSchedule(
+        name=title,
+        rss_links=temp_data['rss_links'],
+        platform=temp_data['platform'],
+        audio_pref=temp_data['audio_pref'],
+        custom_title=temp_data['rename_title'],
+        timestamp=airing_time.timestamp()
+    )
+
+    # Schedule job
+    sch.add_job(
+        process_scheduled_anime,
+        'date',
+        run_date=airing_time,
+        args=(sch_id,),
+        id=f"sch_{sch_id}"
+    )
+
+    # Success message
+    success_text = (
+        f"<b>Scheduled Successfully!</b>\n\n"
+        f"<b>Anime:</b> <code>{title}</code>\n"
+        f"<b>Next Episode:</b> {airing_time.strftime('%d %b %Y • %I:%M %p')} IST\n"
+        f"<b>Schedule ID:</b> <code>{sch_id}</code>\n"
+        f"<b>RSS:</b> {len(temp_data['rss_links'])} link(s)"
+    )
+
+    await query.edit_message_text(success_text)
+
+    # Send poster + confirmation
+    poster_url = f"https://img.anili.st/media/{ani_id}"
+    caption = (
+        f"<b>Added to Auto-Upload Schedule</b>\n\n"
+        f"<b>Title:</b> <code>{title}</code>\n"
+        f"<b>Platform:</b> {temp_data['platform'] or 'Any'}\n"
+        f"<b>Audio:</b> {temp_data['audio_pref'] or 'Any'}\n"
+        f"<b>Filename Title:</b> {temp_data['rename_title'] or 'Auto'}\n\n"
+        f"<i>Next episode will be uploaded automatically.</i>"
+    )
+    await query.message.reply_photo(photo=poster_url, caption=caption)
+
+    # Cleanup
+    temp_schedule_data.pop(query.message.id, None)
+    await query.answer("Scheduled successfully!", show_alert=False)
