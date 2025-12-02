@@ -194,6 +194,50 @@ class TextEditor:
         self.pdata = parse(name)
 
     async def load_anilist(self):
+        # NEW 2025-PROOF METHOD — USES AnilistPython (already working perfectly)
+        try:
+            from AnilistPython import Anilist
+            anilist = Anilist()
+            
+            # Extract clean title from filename
+            clean_name = self.pdata.get("anime_title", "")
+            if not clean_name:
+                return
+
+            # Try exact match first
+            data = anilist.get_anime(clean_name)
+            if not data:
+                # Fallback: try with episode removed
+                fallback = clean_name.split(" - ")[0].split(" Episode ")[0].split(" 01")[0]
+                data = anilist.get_anime(fallback)
+
+            if not data:
+                return
+
+            # Convert to format your bot expects
+            self.adata = {
+                "id": anilist.get_anime_id(clean_name),  # or data.get("id") but ID is reliable
+                "title": {
+                    "romaji": data["name_romaji"],
+                    "english": data["name_english"],
+                    "native": None
+                },
+                "description": data.get("desc", ""),
+                "coverImage": {"large": data["cover_image"]},
+                "bannerImage": data.get("banner_image"),
+                "genres": data.get("genres", []),
+                "status": data.get("airing_status", "RELEASING"),
+                "seasonYear": int(data["starting_time"].split("/")[-1]) if data.get("starting_time") else 2025,
+                "nextAiringEpisode": data.get("next_airing_ep"),
+                "episodes": data.get("airing_episodes")
+            }
+            return
+
+        except Exception as e:
+            from bot.core.reporter import rep
+            await rep.report(f"AnilistPython fallback failed: {e}", "warning")
+
+        # FINAL FALLBACK: old method (only if AnilistPython fails)
         cache_names = []
         for option in [(False, False), (False, True), (True, False), (True, True)]:
             ani_name = await self.parse_name(*option)
@@ -202,7 +246,7 @@ class TextEditor:
             cache_names.append(ani_name)
             self.adata = await AniLister(ani_name, datetime.now().year).get_anidata()
             if self.adata:
-                break
+                return
 
     async def get_id(self):
         if (ani_id := self.adata.get('id')) and str(ani_id).isdigit():
