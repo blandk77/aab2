@@ -1,4 +1,4 @@
-#Add addtask
+#Add FILE_STORE
 from asyncio import sleep as asleep, gather    
 from datetime import datetime    
 from pyrogram.filters import command, private, user, regex    
@@ -351,7 +351,7 @@ async def add_task(client, message):
 
     search_terms = [
         f"{final_title} E{episode:02d}",
-        f"{final_title} {episode:02d}",
+        f"E{episode:02d}] {final_title}",
         f"Episode {episode}",
         f"E{episode:02d}",
         f"- {episode:02d} -",
@@ -359,7 +359,7 @@ async def add_task(client, message):
     ]
 
     found = False
-    async for msg in client.search_messages(Var.FILE_STORE_CHANNEL, limit=50):
+    async for msg in client.search_messages(Var.FILE_STORE, limit=50):
         if msg.caption and any(term in msg.caption for term in search_terms):
             found = True
             break
