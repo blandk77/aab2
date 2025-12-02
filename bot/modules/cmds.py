@@ -1,4 +1,4 @@
-#fixed indent 
+#imported get_animes 
 from asyncio import sleep as asleep, gather    
 from datetime import datetime, timedelta, timezone
 from pyrogram.filters import command, private, user, regex    
@@ -11,7 +11,7 @@ from bot.core.tordownload import TorDownloader
 from bot import bot, bot_loop, Var, ani_cache, sch  
 from bot.core.database import db    
 from bot.core.func_utils import decode, is_fsubbed, get_fsubs, editMessage, sendMessage, new_task, convertTime, getfeed, download_via_torrent    
-from bot.core.auto_animes import process_scheduled_anime    
+from bot.core.auto_animes import process_scheduled_anime, get_animes
 from bot.core.reporter import rep    
 from bot.core.text_utils import AniLister, TextEditor, search_anilist_multiple    
     
