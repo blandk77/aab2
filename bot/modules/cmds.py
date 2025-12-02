@@ -1,10 +1,11 @@
-#Fix sch 
+#Add addtask
 from asyncio import sleep as asleep, gather    
 from datetime import datetime    
 from pyrogram.filters import command, private, user, regex    
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup,CallbackQuery    
 from pyrogram.errors import FloodWait, MessageNotModified    
-    
+import feedparser
+import re
 from bot import bot, bot_loop, Var, ani_cache, sch  
 from bot.core.database import db    
 from bot.core.func_utils import decode, is_fsubbed, get_fsubs, editMessage, sendMessage, new_task, convertTime, getfeed    
@@ -282,3 +283,108 @@ async def handle_anilist_pick(client, query):
     # Cleanup
     temp_schedule_data.pop(query.message.id, None)
     await query.answer("Scheduled successfully!", show_alert=False)
+
+
+@bot.on_message(command('addtask') & private & user(Var.ADMINS))
+@new_task
+async def add_task(client, message):
+    if len(message.command) < 2:
+        return await message.reply(
+            "<b>Usage:</b> <code>/addtask &lt;rss_link&gt; | &lt;optional_custom_title&gt;</code>\n\n"
+            "<i>Example:</i>\n"
+            "<code>/addtask https://nyaa.si/?page=rss&q=%5BToonshub%5D+One+Punch+Man+S3</code>\n"
+            "<code>/addtask https://nyaa.si/?page=rss&q=%5BSubsPlease%5D+Blue+Lock+S2 | Blue Lock Season 2</code>\n\n"
+            "<b>Bot will:</b>\n"
+            "• Parse latest episode from RSS\n"
+            "• Search your file store channel\n"
+            "• Upload only if missing\n"
+            "• Full encode + poster + buttons"
+        )
+
+    args = message.text.split(maxsplit=1)[1]
+    parts = args.split('|', 1)
+    rss_link = parts[0].strip()
+    custom_title = parts[1].strip() if len(parts) > 1 else None
+
+    status = await message.reply("<b>Reading RSS...</b>")
+
+    # Step 1: Get first entry from RSS
+    feed = feedparser.parse(rss_link)
+    if not feed.entries:
+        return await status.edit("<b>Empty or invalid RSS feed!</b>")
+
+    entry = feed.entries[0]
+    title = entry.title
+    torrent_url = entry.link  # usually magnet or .torrent
+
+    await status.edit("<b>Parsing filename...</b>")
+
+    # Step 2: Parse with anitopy
+    parsed = parse(title)
+    anime_name = parsed.get("anime_title")
+    episode = parsed.get("episode_number")
+
+    if not anime_name or not episode:
+        return await status.edit(f"<b>Failed to parse:</b> <code>{title}</code>")
+
+    episode = int(episode)
+
+    await status.edit("<b>Loading AniList data...</b>")
+
+    # Step 3: Get proper title from AniList
+    editor = TextEditor(title)
+    await editor.load_anilist()
+    ani_data = editor.adata
+
+    final_title = custom_title or (
+        ani_data.get("title", {}).get("english") or
+        ani_data.get("title", {}).get("romaji") or
+        anime_name
+    )
+
+    # Step 4: Search file store channel for this episode
+    await status.edit(f"<b>Searching file store for:</b> <code>{final_title} - E{episode:02d}</code>")
+
+    search_texts = [
+        f"{final_title} E{episode:02d}",
+        f"{final_title} {episode:02d}",
+        f"{final_title} Episode {episode}",
+        f"E{episode:02d}",
+        f"- {episode:02d} -",
+        f"[E{episode:02d}]"
+    ]
+
+    found = False
+    async for msg in client.search_messages(Var.FILE_STORE_CHANNEL, query=final_title):
+        if any(text in msg.caption or text in msg.text for text in search_texts):
+            found = True
+            break
+
+    if found:
+        return await status.edit(f"<b>Already exists:</b> <code>{final_title} - Episode {episode}</code>")
+
+    await status.edit(f"<b>Missing! Downloading Episode {episode}...</b>")
+
+    # Step 5: Download file
+    file_path = await download_via_torrent(torrent_url, status)
+    if not file_path:
+        return
+
+    await status.edit(f"<b>Uploading:</b> <code>{final_title} - E{episode:02d}</code>")
+
+    # Step 6: Use your EXACT SAME upload function as scheduled anime
+    await process_scheduled_anime(
+        file_path=file_path,
+        anime_title=final_title,
+        episode_num=episode,
+        ani_data=ani_data or {},
+        platform="Manual Task",
+        audio_pref=None,
+        is_manual=True
+    )
+
+    await status.edit(f"Uploaded Successfully: <code>{final_title} - E{episode:02d}</code>")
+    try:
+        os.unlink(file_path)
+    except:
+        pass
