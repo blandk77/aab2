@@ -1,6 +1,6 @@
-#modify addtask
+#modify airing_time
 from asyncio import sleep as asleep, gather    
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pyrogram.filters import command, private, user, regex    
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup,CallbackQuery    
 from pyrogram.errors import FloodWait, MessageNotModified    
@@ -234,7 +234,9 @@ async def handle_anilist_pick(client, query):
         return await query.answer("No upcoming episode or failed to fetch data.", show_alert=True)
 
     next_air = ani_data['nextAiringEpisode']
-    airing_time = datetime.fromtimestamp(next_air['airingAt'] + 300)  # +5 min buffer
+    utc_time = datetime.fromtimestamp(next_air['airingAt'], tz=timezone.utc)
+    ist_time = utc_time.astimezone(timezone(timedelta(hours=5, minutes=30)))  # IST = UTC+5:30
+    airing_time = ist_time + timedelta(minutes=5)  # +5 min buffer  # +5 min buffer
 
     title = (ani_data['title'].get('english') or
              ani_data['title'].get('romaji') or
