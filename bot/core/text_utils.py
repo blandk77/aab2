@@ -1,4 +1,4 @@
-#Fix
+#Fix - 2
 from calendar import month_name
 from datetime import datetime
 from random import choice
@@ -156,6 +156,12 @@ class AniLister:
                 return (resp.status, await resp.json(), resp.headers)
         
     async def get_anidata(self):
+        if str(self.__ani_name).startswith("id:"):
+            self.__vars = {"id": int(self.__ani_name.split(":", 1)[1])}
+        elif self.__ani_year:
+            self.__vars = {"search": self.__ani_name, "seasonYear": self.__ani_year}
+        else:
+            self.__vars = {"search": self.__ani_name}
         res_code, resp_json, res_heads = await self.post_data()
         while res_code == 404 and self.__ani_year > 2020:
             self.__update_vars()
