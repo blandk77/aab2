@@ -44,7 +44,10 @@ class MongoDB:
             'platform': platform,
             'audio_pref': audio_pref,   # Sub / Dual / None
             'custom_title': custom_title,
-            'timestamp': timestamp
+            'timestamp': timestamp,
+            'file_path': file_path or None,
+            'episode_num': episode or None,
+            'ani_data': ani_data or {}
         }
         await self.__schedules.replace_one({'_id': doc['_id']}, doc, upsert=True)
         return doc['_id']
