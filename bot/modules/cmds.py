@@ -1,4 +1,4 @@
-#Add FILE_STORE
+#rm FILE_STORE part
 from asyncio import sleep as asleep, gather    
 from datetime import datetime    
 from pyrogram.filters import command, private, user, regex    
@@ -345,29 +345,6 @@ async def add_task(client, message):
         ani_data.get("title", {}).get("romaji") or
         anime_name
     )
-
-    # Step 4: Search file store channel
-    await status.edit(f"<b>Checking file store for:</b>\n<code>{final_title} - Episode {episode}</code>")
-
-    search_terms = [
-        f"{final_title} E{episode:02d}",
-        f"E{episode:02d}] {final_title}",
-        f"Episode {episode}",
-        f"E{episode:02d}",
-        f"- {episode:02d} -",
-        f"[E{episode:02d}]"
-    ]
-
-    found = False
-    async for msg in client.search_messages(Var.FILE_STORE, limit=50):
-        if msg.caption and any(term in msg.caption for term in search_terms):
-            found = True
-            break
-
-    if found:
-        return await status.edit(f"<b>Already uploaded:</b>\n<code>{final_title} - Episode {episode}</code>")
-
-    await status.edit(f"<b>Missing! Downloading Episode {episode}...</b>")
 
     # Step 5: Download using YOUR OWN TorDownloader (same as scheduled anime!)
     downloader = TorDownloader(path="/tmp/addtask")
