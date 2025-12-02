@@ -1,3 +1,4 @@
+#Fix
 from calendar import month_name
 from datetime import datetime
 from random import choice
@@ -6,7 +7,7 @@ from aiohttp import ClientSession
 from anitopy import parse
 import re
 from AnilistPython import Anilist
-
+from bot.core.reporter import rep
 
 GENRES_EMOJI = {"Action": "👊", "Adventure": choice(['🪂', '🧗‍♀']), "Comedy": "🤣", "Drama": " 🎭", "Ecchi": choice(['💋', '🥵']), "Fantasy": choice(['🧞', '🧞‍♂', '🧞‍♀','🌗']), "Hentai": "🔞", "Horror": "☠", "Mahou Shoujo": "☯", "Mecha": "🤖", "Music": "🎸", "Mystery": "🔮", "Psychological": "♟", "Romance": "💞", "Sci-Fi": "🛸", "Slice of Life": choice(['☘','🍁']), "Sports": "⚽️", "Supernatural": "🫧", "Thriller": choice(['🥶', '🔪','🤯'])}
 
@@ -24,7 +25,7 @@ CAPTION_FORMAT = """
 
 
 async def search_anilist_multiple(query: str, max_results: int = 5):
-    """Used ONLY for /addschedule picker — get ID first, then full info"""
+    """Used ONLY for /addschedule picker — get ID first, then full info (returns list of dicts)"""
     try:
         anilist = Anilist()
         
@@ -35,56 +36,37 @@ async def search_anilist_multiple(query: str, max_results: int = 5):
             await rep.report(f"AnilistPython: No ID for '{query}'", "warning")
             return []
 
-        # Step 2: Get full info for top matches (simulate multiple by slight query variations if needed)
-        formatted = []
+        # Step 2: Get full info
         base_res = anilist.get_anime_with_id(anime_id)
-        if base_res:
-            formatted.append({
-                "id": base_res.id,
-                "title": {
-                    "english": base_res.english_title or base_res.romaji_title,
-                    "romaji": base_res.romaji_title,
-                    "native": base_res.native_title
-                },
-                "status": base_res.status or "UNKNOWN",
-                "seasonYear": base_res.release_date.year if base_res.release_date else None,
-                "nextAiringEpisode": {
-                    "episode": base_res.episodes or None,
-                    "airingAt": None  # Library doesn't have it; use old for scheduling
-                },
-                "coverImage": {"large": base_res.image_url or "https://via.placeholder.com/300x450"}
-            })
+        if not base_res:
+            from bot.core.reporter import rep
+            await rep.report(f"AnilistPython: No data for ID {anime_id}", "warning")
+            return []
+
+        formatted = [{
+            "id": base_res['id'],
+            "title": {
+                "english": base_res.get('english_title') or base_res.get('romaji_title'),
+                "romaji": base_res.get('romaji_title'),
+                "native": base_res.get('native_title')
+            },
+            "status": base_res.get('status') or "UNKNOWN",
+            "seasonYear": base_res.get('release_date').year if base_res.get('release_date') else None,
+            "nextAiringEpisode": {
+                "episode": base_res.get('episodes'),
+                "airingAt": None  # Library doesn't have it; use old for scheduling
+            },
+            "coverImage": {"large": base_res.get('image_url') or "https://via.placeholder.com/300x450"}
+        }]
         
-        # Optional: Add 1-2 variations for "multiple" results (e.g., English/Romaji swap)
-        variations = [query.replace(" ", ""), query + " anime"]  # e.g., "SawaranaideKotesashikun"
-        for var in variations[:2]:  # Limit to 3 total
-            var_id = anilist.get_anime_id(var)
-            if var_id and var_id != anime_id:
-                var_res = anilist.get_anime_with_id(var_id)
-                if var_res:
-                    formatted.append({
-                        "id": var_res.id,
-                        "title": {
-                            "english": var_res.english_title or var_res.romaji_title,
-                            "romaji": var_res.romaji_title,
-                            "native": var_res.native_title
-                        },
-                        "status": var_res.status or "UNKNOWN",
-                        "seasonYear": var_res.release_date.year if var_res.release_date else None,
-                        "nextAiringEpisode": None,
-                        "coverImage": {"large": var_res.image_url or "https://via.placeholder.com/300x450"}
-                    })
-                    if len(formatted) >= max_results:
-                        break
-        
-        from bot.core.reporter import rep
-        await rep.report(f"AnilistPython: Found {len(formatted)} results for '{query}' (ID: {anime_id})", "info")
-        return formatted
+        await rep.report(f"AnilistPython: Found 1 result for '{query}' (ID: {anime_id})", "info")
+        return formatted[:max_results]
         
     except Exception as e:
         from bot.core.reporter import rep
         await rep.report(f"AnilistPython error: {str(e)}", "error")
         return []
+
 
 ANIME_GRAPHQL_QUERY = """
 query ($id: Int, $search: String, $seasonYear: Int) {
