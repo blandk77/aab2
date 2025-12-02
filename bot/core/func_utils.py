@@ -10,7 +10,7 @@ from traceback import format_exc
 from asyncio import sleep as asleep, create_subprocess_shell
 from asyncio.subprocess import PIPE
 from base64 import urlsafe_b64encode, urlsafe_b64decode
-
+import os
 from aiohttp import ClientSession
 from aiofiles import open as aiopen
 from aioshutil import rmtree as aiormtree
@@ -203,3 +203,24 @@ def convertBytes(sz) -> str:
         sz /= 2**10
         ind += 1
     return f"{round(sz, 2)} {Units[ind]}B"
+
+async def download_via_torrent(torrent_url: str, status_msg) -> str:
+    async with aiohttp.ClientSession() as session:
+        async with session.get(torrent_url) as resp:
+            if "magnet:" in torrent_url:
+                url = torrent_url
+            else:
+                url = f"https://nyaa.si/download/{torrent_url.split('/')[-1]}"
+
+    # Use aria2c (fastest)
+    temp_dir = "/tmp/addtask_dl"
+    os.makedirs(temp_dir, exist_ok=True)
+    cmd = f"aria2c --seed-time=0 --dir='{temp_dir}' --bt-save-metadata=false '{url}'"
+    os.system(cmd)
+
+    files = [f for f in os.listdir(temp_dir) if f.endswith(('.mkv', '.mp4', '.ass'))]
+    if not files:
+        await status_msg.edit("<b>Download failed!</b>")
+        return None
+
+    return os.path.join(temp_dir, files[0])
