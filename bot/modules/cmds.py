@@ -207,7 +207,7 @@ async def add_schedule(client, message):
 # ============ CALLBACK HANDLER FOR PICKER ============    
 @bot.on_callback_query(regex(r'^ani_'))    
 @new_task    
-async def handle_anilist_pick(client: CallbackQuery):    
+async def handle_anilist_pick(client, CallbackQuery):    
     data = client.data    
     ani_id = int(data.split('_')[1])    
     
