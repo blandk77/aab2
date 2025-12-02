@@ -14,7 +14,7 @@ from bot.core.database import db
 from bot.core.func_utils import decode, is_fsubbed, get_fsubs, editMessage, sendMessage, new_task, convertTime, getfeed, download_via_torrent    
 from bot.core.auto_animes import process_scheduled_anime    
 from bot.core.reporter import rep    
-from bot.core.text_utils import AniLister, search_anilist_multiple    
+from bot.core.text_utils import AniLister, TextEditor, search_anilist_multiple    
     
 temp_schedule_data = {}    
     
