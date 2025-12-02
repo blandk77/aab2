@@ -36,7 +36,7 @@ class MongoDB:
                 )
   
     # === NEW SCHEDULE SYSTEM ===
-    async def saveSchedule(self, name, rss_links, platform, audio_pref, custom_title, timestamp, file_path=None, episode_num=None, ani_data=None):
+    async def saveSchedule(self, name, rss_links, platform, audio_pref, custom_title, timestamp, file_path=None, episode=None, ani_data=None):
         doc = {
             '_id': str(hash(name + ''.join(rss_links))),  # unique
             'name': name,
