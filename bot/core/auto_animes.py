@@ -5,7 +5,7 @@ from time import time
 from datetime import datetime
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from pyrogram.errors import BadRequest
-from bot import bot, Var, ani_cache, ffQueue, ffLock, ff_queued, sch
+from bot import bot, Var, ani_cache, ffQueue, ffLock, ff_queued, sch, bot_loop
 from .tordownload import TorDownloader
 from .database import db
 from .func_utils import getfeed, mediainfo, editMessage, sendMessage, convertBytes, encode
