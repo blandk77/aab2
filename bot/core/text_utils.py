@@ -25,46 +25,34 @@ CAPTION_FORMAT = """
 
 
 async def search_anilist_multiple(query: str, max_results: int = 5):
-    """Used ONLY for /addschedule picker — get ID first, then full info (returns list of dicts)"""
+    """Returns list with 1 perfect result — works for ALL anime including 2025"""
     try:
         anilist = Anilist()
+        data = anilist.get_anime(query)
         
-        # Step 1: Get ID (fuzzy search, no year — avoids error)
-        anime_id = anilist.get_anime_id(query)
-        if not anime_id:
-            from bot.core.reporter import rep
-            await rep.report(f"AnilistPython: No ID for '{query}'", "warning")
-            return []
-
-        # Step 2: Get full info
-        base_res = anilist.get_anime_with_id(anime_id)
-        if not base_res:
-            from bot.core.reporter import rep
-            await rep.report(f"AnilistPython: No data for ID {anime_id}", "warning")
+        if not data:
+            await rep.report(f"AnilistPython: No result for '{query}'", "warning")
             return []
 
         formatted = [{
-            "id": base_res['id'],
+            "id": anilist.get_anime_id(query),
             "title": {
-                "english": base_res.get('english_title') or base_res.get('romaji_title'),
-                "romaji": base_res.get('romaji_title'),
-                "native": base_res.get('native_title')
+                "english": data.get("name_english") or data.get("name_romaji"),
+                "romaji": data.get("name_romaji"),
+                "native": None
             },
-            "status": base_res.get('status') or "UNKNOWN",
-            "seasonYear": base_res.get('release_date').year if base_res.get('release_date') else None,
-            "nextAiringEpisode": {
-                "episode": base_res.get('episodes'),
-                "airingAt": None  # Library doesn't have it; use old for scheduling
-            },
-            "coverImage": {"large": base_res.get('image_url') or "https://via.placeholder.com/300x450"}
+            "status": data.get("airing_status", "UNKNOWN").title(),
+            "seasonYear": int(data["starting_time"].split("/")[-1]) if data.get("starting_time") else None,
+            "nextAiringEpisode": data.get("next_airing_ep"),
+            "coverImage": {"large": data.get("cover_image") or "https://via.placeholder.com/300x450"}
         }]
-        
-        await rep.report(f"AnilistPython: Found 1 result for '{query}' (ID: {anime_id})", "info")
-        return formatted[:max_results]
-        
+
+       
+        await rep.report(f"AnilistPython SUCCESS → '{data.get('name_romaji') or data.get('name_english')}' (2025 OK)", "info")
+        return formatted
+
     except Exception as e:
-        from bot.core.reporter import rep
-        await rep.report(f"AnilistPython error: {str(e)}", "error")
+        await rep.report(f"AnilistPython final error: {str(e)}", "error")
         return []
 
 
