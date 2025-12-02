@@ -23,21 +23,30 @@ CAPTION_FORMAT = """
 """
 
 
-
 async def search_anilist_multiple(query: str, max_results: int = 5):
-    """Used ONLY for /addschedule picker — searches AniList via AnilistPython"""
+    """Used ONLY for /addschedule picker — searches AniList via AnilistPython (returns list of dicts)"""
     try:
         anilist = Anilist()
-        # Search anime (fuzzy, handles English/Romaji/Native)
-        results = anilist.searchAnime(query, amount=max_results)
         
-        if not results or len(results) == 0:
-            from bot.core.reporter import rep
-            await rep.report(f"AnilistPython: No results for '{query}'", "warning")
-            return []
+        # Use search_anime with loose filters for multiple results (fuzzy search)
+        current_year = datetime.now().year
+        results = anilist.search_anime(year=[current_year], score=range(0, 100))  # Broad search by year for ongoing 2025 anime
+        
+        # Filter results by query relevance (simple string match in title)
+        filtered = [res for res in results if query.lower() in (res.english_title or "").lower() or query.lower() in (res.romaji_title or "").lower()]
+        
+        # Fallback to get_anime if no filtered results (single result)
+        if not filtered:
+            single_res = anilist.get_anime(query)
+            if single_res:
+                filtered = [single_res]
+            else:
+                from bot.core.reporter import rep
+                await rep.report(f"AnilistPython: No results for '{query}'", "warning")
+                return []
 
         formatted = []
-        for res in results:
+        for res in filtered[:max_results]:
             formatted.append({
                 "id": res.id,
                 "title": {
