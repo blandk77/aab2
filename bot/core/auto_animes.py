@@ -8,7 +8,7 @@ from pyrogram.errors import BadRequest
 from bot import bot, Var, ani_cache, ffQueue, ffLock, ff_queued, sch
 from .tordownload import TorDownloader
 from .database import db
-from .func_utils import getfeed, mediainfo, editMessage, sendMessage, convertBytes
+from .func_utils import getfeed, mediainfo, editMessage, sendMessage, convertBytes, encode
 from .text_utils import TextEditor
 from .ffencoder import FFEncoder
 from .tguploader import TgUploader
