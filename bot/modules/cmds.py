@@ -5,10 +5,9 @@ from pyrogram.filters import command, private, user, regex
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup,CallbackQuery    
 from pyrogram.errors import FloodWait, MessageNotModified    
 import feedparser
-import re
+import re, time, os
 from anitopy import parse
 from bot.core.tordownload import TorDownloader
-import os
 from bot import bot, bot_loop, Var, ani_cache, sch  
 from bot.core.database import db    
 from bot.core.func_utils import decode, is_fsubbed, get_fsubs, editMessage, sendMessage, new_task, convertTime, getfeed, download_via_torrent    
@@ -288,13 +287,13 @@ async def handle_anilist_pick(client, query):
     await query.answer("Scheduled successfully!", show_alert=False)
 
 
+
 @bot.on_message(command('addtask') & private & user(Var.ADMINS))
 @new_task
 async def add_task(client, message):
     if len(message.command) < 2:
         return await message.reply(
-            "<b>Usage:</b> <code>/addtask &lt;link&gt; | &lt;optional_title&gt;</code>\n\n"
-            "<i>Supported: RSS, Nyaa view, magnet, .torrent</i>\n"
+            "<b>Usage:</b> <code>/addtask &lt;rss_link_or_nyaa_view&gt; | &lt;optional_title&gt;</code>\n\n"
             "<b>Bot will upload immediately — full encode + poster + buttons</b>"
         )
 
@@ -303,74 +302,63 @@ async def add_task(client, message):
     link = parts[0].strip()
     custom_title = parts[1].strip() if len(parts) > 1 else None
 
-    status = await message.reply("<b>Preparing task...</b>")
+    status = await message.reply("<b>Preparing manual upload...</b>")
 
-    # Step 1: Get torrent + parse
+    # Get RSS or direct link
     if "nyaa.si/?page=rss" in link:
         feed = feedparser.parse(link)
         if not feed.entries:
-            return await status.edit("<b>Empty RSS!</b>")
+            return await status.edit("<b>RSS empty!</b>")
         entry = feed.entries[0]
-        torrent_link = entry.link
+        rss_link = entry.link
         filename = entry.title
     else:
-        torrent_link = link
-        filename = link.split("/")[-1].split("?")[0].replace(".torrent", "")
+        rss_link = link
+        filename = link.split("/")[-1].replace(".torrent", "")
 
-    await status.edit("<b>Parsing filename...</b>")
+    # Parse episode
     parsed = parse(filename)
-    anime_name = parsed.get("anime_title")
-    episode = parsed.get("episode_number")
-    if not anime_name or not episode:
+    if not parsed.get("anime_title") or not parsed.get("episode_number"):
         return await status.edit(f"<b>Failed to parse:</b>\n<code>{filename}</code>")
 
-    episode = int(episode)
+    episode = int(parsed["episode_number"])
 
-    # Load AniList
+    # Load AniList (now uses AnilistPython — fixed earlier)
     editor = TextEditor(filename)
     await editor.load_anilist()
-    ani_data = editor.adata
+    if not editor.adata:
+        return await status.edit("<b>AniList not found!</b>")
 
-    final_title = custom_title or (
-        ani_data.get("title", {}).get("english") or
-        ani_data.get("title", {}).get("romaji") or
-        anime_name
+    title = custom_title or (
+        editor.adata["title"].get("english") or
+        editor.adata["title"].get("romaji") or
+        parsed["anime_title"]
     )
 
-    await status.edit(f"<b>Downloading Episode {episode}...</b>")
-
-    # Download using your TorDownloader
-    downloader = TorDownloader(path="/tmp/addtask")
-    file_path = await downloader.download(torrent_link)
-    if not file_path or not os.path.exists(file_path):
-        return await status.edit("<b>Download failed!</b>")
-
-    # Create a FAKE schedule entry that runs NOW
-    now = datetime.now()
+    # SAVE AS NORMAL SCHEDULE (no extra args!)
     sch_id = await db.saveSchedule(
-        name=final_title,
-        rss_links=[torrent_link],           # we store the link
+        name=title,
+        rss_links=[rss_link],           # important: the RSS or torrent link
         platform="Manual Task",
         audio_pref=None,
         custom_title=custom_title,
-        timestamp=now.timestamp(),
-        file_path=file_path,                 # we sneakily save the path
-        episode_num=episode,
-        ani_data=ani_data
+        timestamp=time.time() + 10      # run in 10 seconds
     )
 
-    # Schedule it to run IMMEDIATELY
+    # Schedule IMMEDIATELY
+    run_time = datetime.now() + timedelta(seconds=10)
     sch.add_job(
         process_scheduled_anime,
         'date',
-        run_date=now + timedelta(seconds=5),
+        run_date=run_time,
         args=(sch_id,),
         id=f"manual_{sch_id}",
         replace_existing=True
     )
 
     await status.edit(
-        f"<b>Task added! Uploading in 5 seconds...</b>\n\n"
-        f"<code>{final_title} - Episode {episode}</code>\n"
+        f"<b>Task Scheduled!</b>\n\n"
+        f"<code>{title} - Episode {episode}</code>\n"
+        f"<b>Upload starts in 10 seconds...</b>\n"
         f"<b>ID:</b> <code>{sch_id}</code>"
-)
+    )
