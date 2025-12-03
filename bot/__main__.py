@@ -8,7 +8,11 @@ from signal import SIGKILL
 from bot import bot, Var, bot_loop, LOGS, ffQueue, ffLock, ffpids_cache, ff_queued, sch
 from bot.core.func_utils import clean_up, new_task, editMessage
 from bot.modules.up_posts import upcoming_animes
-
+from bot.core.database import db
+from bot.core.func_utils import getfeed
+from anitopy import parse
+from bot.core.auto_animes import get_animes
+from bot.core.reporter import rep
 
 @bot.on_message(command('restart') & user(Var.ADMINS))
 @new_task
@@ -29,6 +33,22 @@ async def restart(client, message):
     async with aiopen(".restartmsg", "w") as f:
         await f.write(f"{rmessage.chat.id}\n{rmessage.id}\n")
     execl(executable, executable, "-m", "bot")
+
+async def restart_check_missed():
+    schedules = await db.listSchedules()
+    for sch in schedules:
+        for rss in sch['rss_links']:
+            feed = await getfeed(rss, 0)
+            if feed and feed.entries:
+                latest_title = feed.entries[0].title
+                parsed = parse(latest_title)
+                episode = parsed.get("episode_number")
+                if episode:
+                    ani_id = sch.get("ani_id")  # from DB
+                    if ani_id and not await db.getAnime(ani_id) or not ani_data.get(episode):
+                        await rep.report(f"Restart: Uploading missed {sch['name']} Ep {episode}", "info")
+                        await get_animes(latest_title, feed.entries[0].link, force=True, sch_data=sch)
+
 
 async def restart():
     if ospath.isfile(".restartmsg"):
@@ -62,6 +82,7 @@ async def main():
         sch.add_job(upcoming_animes, "cron", hour=0, minute=30)
         
     LOGS.info('Auto Anime Bot Started! Running in SCHEDULE mode.')
+    await restart_check_missed()
     bot_loop.create_task(queue_loop())
     await idle()
     LOGS.info('Auto Anime Bot Stopped!')
