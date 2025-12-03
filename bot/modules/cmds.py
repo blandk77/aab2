@@ -1,4 +1,4 @@
-#modify addschedule and it's callback
+#fixed addschedule callback
 from asyncio import sleep as asleep, gather    
 from datetime import datetime, timedelta, timezone
 from pyrogram.filters import command, private, user, regex    
@@ -210,7 +210,7 @@ async def handle_anilist_pick(client, query):
 
     # Fetch full data
     anilister = AniLister(f"id:{ani_id}")
-    ani_data = await anilist.get_anidata()
+    ani_data = await anilister.get_anidata()
     if not ani_data:
         return await query.answer("Failed to fetch details.", show_alert=True)
 
