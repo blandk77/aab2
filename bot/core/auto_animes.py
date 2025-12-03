@@ -141,7 +141,8 @@ async def get_animes(name, torrent, force=False, sch_data=None):
     try:
         aniInfo = TextEditor(name)
         await aniInfo.load_anilist()
-        ani_id, ep_no = aniInfo.adata.get('id'), aniInfo.pdata.get("episode_number")
+        ani_id = aniInfo.adata.get('id')
+        ep_no = aniInfo.pdata.get("episode_number")
         if not ani_id or not ep_no:
             return
 
@@ -150,86 +151,101 @@ async def get_animes(name, torrent, force=False, sch_data=None):
         if ani_id not in ani_cache['ongoing']:
             ani_cache['ongoing'].add(ani_id)
 
-        # FIXED 5: Skip non-1080p
+        # Skip non-1080p
         if '1080p' not in name.lower():
             await rep.report(f"Skipped (not 1080p): {name}", "warning")
             return
 
-        # Check if already uploaded
+        # Check DB
         anime_data = await db.getAnime(ani_id)
         if anime_data and str(ep_no) in anime_data:
             return
 
-        await rep.report(f"New Episode → {name}", "info")
+        await rep.report(f"Processing → {name}", "info")
 
-        # Download first
+        # Download
         stat_msg = await sendMessage(Var.MAIN_CHANNEL, f"**Downloading:**\n`{name}`")
         dl = await TorDownloader("./downloads").download(torrent, name)
         if not dl or not ospath.exists(dl):
             await editMessage(stat_msg, "**Download Failed!**")
             return
 
-        # NOW detect audio/sub from file
-        minfo_json = await mediainfo(dl, get_json=True)
-        minfo = jloads(minfo_json)['media']['track']
+        # Wait for file to be fully written
+        await asleep(3)
 
-        audio_tracks = [t for t in minfo if t['@type'] == 'Audio']
-        text_tracks = [t for t in minfo if t['@type'] == 'Text']
+        # SAFE mediainfo with fallback
+        audio_lang = "Japanese"
+        sub_type = "Multi-Sub"
+        audio_type = "Sub"
+        poster_url = await aniInfo.get_poster()
 
-        audio_langs = [t.get('Language', '').lower() for t in audio_tracks]
-        sub_langs = [t.get('Language', '').lower() for t in text_tracks]
+        try:
+            minfo_json = await mediainfo(dl, get_json=True)
+            if minfo_json and minfo_json.strip():
+                minfo = jloads(minfo_json)
+                tracks = minfo.get('media', {}).get('track', [])
 
-        is_dual = len(audio_tracks) >= 2 and 'eng' in audio_langs and any(x in audio_langs for x in ['jpn', 'ja', 'jp'])
-        has_eng_sub = any('eng' in l for l in sub_langs)
+                audio_tracks = [t for t in tracks if t.get('@type') == 'Audio']
+                text_tracks = [t for t in tracks if t.get('@type') == 'Text']
 
-        if not has_eng_sub:
-            await editMessage(stat_msg, "**Skipped: No English Subtitles**")
-            await aioremove(dl)
-            return
+                audio_langs = [t.get('Language', '').lower() for t in audio_tracks]
+                sub_langs = [t.get('Language', '').lower() for t in text_tracks]
 
-        audio_lang = "Japanese + English" if is_dual else "Japanese"
-        sub_type = "Multi-Sub" if len(text_tracks) > 1 else "English"
-        audio_type = "Dual" if is_dual else "Sub"
+                has_jp = any(x in audio_langs for x in ['ja', 'jpn', 'jp', 'japanese'])
+                has_eng_audio = 'eng' in audio_langs
+                has_eng_sub = any('eng' in l for l in sub_langs)
 
-        await editMessage(stat_msg, f"**Detected:**\nAudio: {audio_lang}\nSub: {sub_type}\n\n**Encoding...**")
+                if not has_eng_sub:
+                    await editMessage(stat_msg, "**Skipped: No English Subtitles**")
+                    await aioremove(dl)
+                    return
 
-        # FIXED: Use correct poster for current season
+                if has_jp and has_eng_audio and len(audio_tracks) >= 2:
+                    audio_lang = "Japanese, English"
+                    audio_type = "Dual"
+                elif has_jp:
+                    audio_lang = "Japanese"
+                else:
+                    audio_lang = "Unknown"
+
+                sub_type = "Multi-Sub" if len(text_tracks) > 1 else "English"
+
+            else:
+                await rep.report(f"mediainfo returned empty for {dl}", "warning")
+
+        except Exception as e:
+            await rep.report(f"mediainfo failed: {e} → using default", "warning")
+
+        # Try season-specific poster
         season_num = aniInfo.pdata.get("anime_season")
         if isinstance(season_num, list):
             season_num = season_num[-1]
-        season_year = aniInfo.adata.get("seasonYear")
-
-        # Try to get season-specific poster (Anilist sometimes has different ID per season)
-        poster_url = await aniInfo.get_poster()
         if season_num and int(season_num) > 1:
             try:
                 from AnilistPython import Anilist
                 anilist = Anilist()
-                search_name = f"{aniInfo.pdata.get('anime_title')} Season {season_num}"
-                alt_id = anilist.get_anime_id(search_name)
+                search = f"{aniInfo.pdata.get('anime_title')} Season {season_num}"
+                alt_id = anilist.get_anime_id(search)
                 if alt_id and alt_id != ani_id:
                     poster_url = f"https://img.anili.st/media/{alt_id}"
             except:
-                pass  # fallback to main poster
+                pass
 
-        # NOW send post with CORRECT caption + poster
-        caption = await aniInfo.get_caption(
-            audio_lang=audio_lang,
-            sub_type=sub_type
-        )
-
+        # NOW send correct post
+        caption = await aniInfo.get_caption(audio_lang=audio_lang, sub_type=sub_type)
         post_msg = await bot.send_photo(
             Var.MAIN_CHANNEL,
             photo=poster_url,
             caption=caption
         )
 
-        # Encoding & Upload
+        await editMessage(stat_msg, "**Encoding...**")
+
         post_id = post_msg.id
         ffEvent = Event()
         ff_queued[post_id] = ffEvent
         if ffLock.locked():
-            await editMessage(stat_msg, "**Queued for encoding...**")
+            await editMessage(stat_msg, "**Queued...**")
         await ffQueue.put(post_id)
         await ffEvent.wait()
 
@@ -244,11 +260,8 @@ async def get_animes(name, torrent, force=False, sch_data=None):
                 audio_type=audio_type
             )
 
-            await editMessage(stat_msg, f"**Encoding {qual}p...**")
-
             out_path = await FFEncoder(stat_msg, dl, filename, qual).start_encode()
             if not out_path:
-                ffLock.release()
                 continue
 
             await editMessage(stat_msg, f"**Uploading {qual}p...**")
@@ -257,7 +270,7 @@ async def get_animes(name, torrent, force=False, sch_data=None):
             link = f"https://t.me/{(await bot.get_me()).username}?start=get-{msg.id * abs(Var.FILE_STORE)}"
             btn_text = f"{btn_formatter[qual]} - {convertBytes(msg.document.file_size)}"
 
-            if len(btns) > 0 and len(btns[-1]) == 1:
+            if btns and len(btns[-1]) == 1:
                 btns[-1].insert(1, InlineKeyboardButton(btn_text, url=link))
             else:
                 btns.append([InlineKeyboardButton(btn_text, url=link)])
@@ -272,7 +285,7 @@ async def get_animes(name, torrent, force=False, sch_data=None):
         ani_cache['completed'].add(ani_id)
 
     except Exception as e:
-        await rep.report(f"get_animes error: {e}\n{format_exc()}", "error")
+        await rep.report(f"get_animes fatal error: {e}\n{format_exc()}", "error")
         
 async def extra_utils(msg_id, out_path):
     msg = await bot.get_messages(Var.FILE_STORE, message_ids=msg_id)
