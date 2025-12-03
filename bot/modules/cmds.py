@@ -199,7 +199,7 @@ async def add_schedule(client, message):
         'user_id': message.from_user.id
     }
 
-@bot.on_callback_query(filters.regex(r'^ani_'))
+@bot.on_callback_query(regex(r'^ani_'))
 @new_task
 async def handle_anilist_pick(client, query):
     ani_id = int(query.data.split('_')[1])
