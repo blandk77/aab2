@@ -13,6 +13,8 @@ from bot.core.func_utils import getfeed
 from anitopy import parse
 from bot.core.auto_animes import get_animes
 from bot.core.reporter import rep
+import feedparser
+
 
 @bot.on_message(command('restart') & user(Var.ADMINS))
 @new_task
@@ -35,19 +37,75 @@ async def restart(client, message):
     execl(executable, executable, "-m", "bot")
 
 async def restart_check_missed():
+    LOGS.info("Starting restart missed-episode check...")
     schedules = await db.listSchedules()
+    checked = 0
+    uploaded = 0
+
     for sch in schedules:
-        for rss in sch['rss_links']:
-            feed = await getfeed(rss, 0)
-            if feed and feed.entries:
-                latest_title = feed.entries[0].title
+        rss_links = sch.get('rss_links', [])
+        ani_id = sch.get('ani_id')
+        custom_title = sch.get('custom_title')
+        name = sch.get('name', 'Unknown Anime')
+
+        if not rss_links or not ani_id:
+            continue
+
+        checked += 1
+
+        for rss in rss_links:
+            try:
+                feed = feedparser.parse(rss.strip())
+                
+                if not feed or not hasattr(feed, 'entries') or not feed.entries:
+                    LOGS.warning(f"Empty or invalid RSS during restart check: {rss}")
+                    continue
+
+                latest_entry = feed.entries[0]
+                latest_title = latest_entry.title
+                torrent_link = latest_entry.link
+
+                
                 parsed = parse(latest_title)
                 episode = parsed.get("episode_number")
-                if episode:
-                    ani_id = sch.get("ani_id")  # from DB
-                    if ani_id and not await db.getAnime(ani_id) or not ani_data.get(episode):
-                        await rep.report(f"Restart: Uploading missed {sch['name']} Ep {episode}", "info")
-                        await get_animes(latest_title, feed.entries[0].link, force=True, sch_data=sch)
+                if not episode:
+                    continue
+
+                if '1080p' not in latest_title.lower():
+                    continue
+
+                anime_data = await db.getAnime(ani_id)
+                if anime_data and str(episode) in anime_data:
+                    continue 
+
+                LOGS.info(f"Restart: Found missed episode → {name} - Episode {episode}")
+                await rep.report(f"Restart Recovery: Uploading {name} Episode {episode}", "info")
+
+                
+                sch_data = {
+                    'custom_title': custom_title,
+                    'platform': sch.get('platform'),
+                    'audio_pref': sch.get('audio_pref'),
+                    'rss_link': rss
+                }
+
+                await get_animes(
+                    name=latest_title,
+                    torrent=torrent_link,
+                    force=True,
+                    sch_data=sch_data
+                )
+
+                uploaded += 1
+                await asleep(3)
+
+            except Exception as e:
+                LOGS.error(f"Error in restart_check_missed for RSS {rss}: {e}")
+                continue
+
+    LOGS.info(f"Restart check complete: {checked} schedules scanned, {uploaded} episodes recovered.")
+    if uploaded == 0:
+        LOGS.info("No missed episodes found.")
 
 
 async def restart():
