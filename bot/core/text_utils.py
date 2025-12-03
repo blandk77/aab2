@@ -5,6 +5,8 @@ from asyncio import sleep as asleep
 from aiohttp import ClientSession
 from anitopy import parse
 import re
+from bot import bot, Var, ani_cache, ffQueue, ffLock, ff_queued, sch, bot_loop
+from bot.core.reporter import rep
 
 # ORIGINAL GENRES_EMOJI (unchanged)
 GENRES_EMOJI = {"Action": "👊", "Adventure": choice(['🪂', '🧗‍♀']), "Comedy": "🤣", "Drama": " 🎭", "Ecchi": choice(['💋', '🥵']), "Fantasy": choice(['🧞', '🧞‍♂', '🧞‍♀','🌗']), "Hentai": "🔞", "Horror": "☠", "Mahou Shoujo": "☯", "Mecha": "🤖", "Music": "🎸", "Mystery": "🔮", "Psychological": "♟", "Romance": "💞", "Sci-Fi": "🛸", "Slice of Life": choice(['☘','🍁']), "Sports": "⚽️", "Supernatural": "🫧", "Thriller": choice(['🥶', '🔪','🤯'])}
@@ -29,13 +31,11 @@ async def search_anilist_multiple(query: str, max_results: int = 5):
         anilist = Anilist()
         anime_id = anilist.get_anime_id(query)
         if not anime_id:
-            from bot.core.reporter import rep
             await rep.report(f"AnilistPython: No ID for '{query}'", "warning")
             return []
 
         data = anilist.get_anime_with_id(anime_id)
         if not data:
-            from bot.core.reporter import rep
             await rep.report(f"AnilistPython: No data for ID {anime_id}", "warning")
             return []
 
@@ -52,12 +52,11 @@ async def search_anilist_multiple(query: str, max_results: int = 5):
             "coverImage": {"large": data.get("cover_image") or "https://via.placeholder.com/300x450"}
         }]
 
-        from bot.core.reporter import rep
+        
         await rep.report(f"AnilistPython: Found 1 result for '{query}' (ID: {anime_id})", "info")
         return formatted
 
     except Exception as e:
-        from bot.core.reporter import rep
         await rep.report(f"AnilistPython error: {str(e)}", "error")
         return []
 
@@ -195,7 +194,6 @@ class TextEditor:
 
     async def load_anilist(self):
         try:
-            from AnilistPython import Anilist
             anilist = Anilist()
             
             clean_name = self.pdata.get("anime_title", "")
