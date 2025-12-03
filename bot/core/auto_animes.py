@@ -1,3 +1,4 @@
+#modify get_anime
 from asyncio import gather, create_task, sleep as asleep, Event
 from os import path as ospath, remove as osremove
 from aiofiles.os import remove as aioremove
@@ -134,7 +135,8 @@ async def process_scheduled_anime(sch_id):
     await rep.report(f"TIMEOUT after 6h: {sch_data['name']} – No valid release", "error")
     await db.delSchedule(sch_id)
 
-async def get_animes(name, torrent, force=False, sch_data=None, dl_path=None, audio_lang="Japanese", sub_type="English", audio_type="Sub"):
+# FIXED 1, 2: Better audio/sub detection (use mediainfo before encoding)
+async def get_animes(name, torrent, force=False, sch_data=None):
     try:
         aniInfo = TextEditor(name)
         await aniInfo.load_anilist()
@@ -153,11 +155,16 @@ async def get_animes(name, torrent, force=False, sch_data=None, dl_path=None, au
                 await rep.report(f"Torrent Skipped!\n\n{name}", "warning")
                 return
             
+            # FIXED 5: Only proceed if '1080p' in title
+            if '1080p' not in name.lower():
+                await rep.report(f"Skipped: {name} (not 1080p)", "warning")
+                return
+
             await rep.report(f"New Anime Torrent Found!\n\n{name}", "info")
             post_msg = await bot.send_photo(
                 Var.MAIN_CHANNEL,
                 photo=await aniInfo.get_poster(),
-                caption=await aniInfo.get_caption(audio_lang=audio_lang, sub_type=sub_type)
+                caption=await aniInfo.get_caption()
             )
             
             await asleep(1.5)
@@ -166,6 +173,28 @@ async def get_animes(name, torrent, force=False, sch_data=None, dl_path=None, au
             if not dl or not ospath.exists(dl):
                 await rep.report(f"File Download Incomplete, Try Again", "error")
                 await stat_msg.delete()
+                return
+
+            # FIXED 1, 2: Detect audio/sub from metadata
+            minfo = jloads(await mediainfo(dl, get_json=True))['media']['track']
+            audio_tracks = [t for t in minfo if t['@type'] == 'Audio']
+            text_tracks = [t for t in minfo if t['@type'] == 'Text']
+            
+            langs = [t.get('Language', '').lower() for t in audio_tracks]
+            original_langs = ['jpn', 'chi', 'kor']
+            is_dual = len(audio_tracks) == 2 and 'eng' in langs and any(l in original_langs for l in langs)
+            audio_lang = next((l.upper() for l in langs if l in original_langs), 'Japanese')
+            if is_dual:
+                audio_lang += " + English"
+                audio_type = "Dual"
+            else:
+                audio_type = "Sub"
+            
+            eng_sub = any('eng' in t.get('Language', '').lower() for t in text_tracks)
+            sub_type = "Multi-Sub" if len(text_tracks) > 1 else "English"
+            if not eng_sub:
+                await rep.report(f"Skipped: {name} (no English subs)", "warning")
+                await aioremove(dl)
                 return
 
             post_id = post_msg.id
@@ -180,7 +209,7 @@ async def get_animes(name, torrent, force=False, sch_data=None, dl_path=None, au
             await ffLock.acquire()
             btns = []
             for qual in Var.QUALS:
-                # FIXED: Pass custom_title from sch_data if available
+                # FIXED 7: Pass custom_title from sch_data
                 custom_title = sch_data['custom_title'] if sch_data and sch_data.get('custom_title') else None
                 filename = await aniInfo.get_upname(qual, custom_title=custom_title, audio_type=audio_type)
                 await editMessage(stat_msg, f"‣ <b>Anime Name :</b> <b><i>{name}</i></b>\n\n<i>Ready to Encode...</i>")
