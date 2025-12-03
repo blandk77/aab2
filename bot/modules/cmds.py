@@ -210,7 +210,7 @@ async def handle_anilist_pick(client, query):
 
     # Fetch full data
     anilister = AniLister(f"id:{ani_id}")
-    ani_data = await anilister.get_anidata()
+    ani_data = await anilist.get_anidata()
     if not ani_data:
         return await query.answer("Failed to fetch details.", show_alert=True)
 
@@ -240,21 +240,21 @@ async def handle_anilist_pick(client, query):
         id=f"sch_{sch_id}"
     )
 
-    # Step 2: CATCH-UP LATEST FROM RSS (if available)
-    catch_up_msg = await query.message.reply("<b>Catching up latest episode...</b>")
+    # Step 2: CATCH-UP LATEST FROM RSS (FIXED — no crash if empty)
+    catch_up_msg = await query.message.reply("<b>Checking for missed episodes...</b>")
 
+    missed_count = 0
     for rss in temp_data['rss_links']:
-        feed = await getfeed(rss, 0)
-        if feed:
-            latest_entry = feed.entries[0] if feed.entries else None
-            if latest_entry:
+        try:
+            feed = feedparser.parse(rss)
+            if hasattr(feed, 'entries') and feed.entries:
+                latest_entry = feed.entries[0]
                 latest_title = latest_entry.title
                 parsed = parse(latest_title)
                 latest_episode = parsed.get("episode_number")
-                if latest_episode and int(latest_episode) < int(next_air['episode']):  # Latest < next → missed
-                    # Check DB for latest episode
+                if latest_episode and int(latest_episode) < int(next_air['episode']):
+                    # Check DB
                     if not await db.getAnime(ani_id) or not ani_data.get(latest_episode):
-                        # Upload latest (use your upload logic)
                         await catch_up_msg.edit(f"<b>Uploading missed Episode {latest_episode}...</b>")
                         await get_animes(
                             name=latest_title,
@@ -262,9 +262,18 @@ async def handle_anilist_pick(client, query):
                             force=True,
                             sch_data=temp_data
                         )
-                        await catch_up_msg.edit(f"<b>Uploaded Episode {latest_episode}!</b>")
+                        missed_count += 1
                     else:
-                        await catch_up_msg.edit(f"<b>Episode {latest_episode} already uploaded.</b>")
+                        await rep.report(f"Episode {latest_episode} already uploaded", "info")
+            else:
+                await rep.report(f"RSS '{rss}' empty — skipping catch-up", "warning")
+        except Exception as e:
+            await rep.report(f"RSS catch-up error for '{rss}': {e}", "warning")
+
+    if missed_count > 0:
+        await catch_up_msg.edit(f"<b>Uploaded {missed_count} missed episode(s)!</b>")
+    else:
+        await catch_up_msg.delete()
 
     # Success message
     success_text = (
@@ -272,11 +281,12 @@ async def handle_anilist_pick(client, query):
         f"<b>Anime:</b> <code>{title}</code>\n"
         f"<b>Next Episode:</b> {airing_time.strftime('%d %b %Y • %I:%M %p')} IST\n"
         f"<b>ID:</b> <code>{sch_id}</code>\n\n"
-        "<i>Latest episode checked — ready for auto-upload!</i>"
+        "<i>Latest episodes checked — ready for auto-upload!</i>"
     )
 
     await query.edit_message_text(success_text)
 
+    # Poster confirmation
     poster_url = f"https://img.anili.st/media/{ani_id}"
     caption = (
         f"<b>Added to Schedule:</b>\n"
@@ -288,7 +298,7 @@ async def handle_anilist_pick(client, query):
 
     # Cleanup
     temp_schedule_data.pop(query.message.id, None)
-    await query.answer("Scheduled! Latest checked — use /listschedule.", show_alert=False)
+    await query.answer("Scheduled! Check /listschedule.", show_alert=False)
 
 @bot.on_message(command('addtask') & private & user(Var.ADMINS))
 @new_task
